@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 tebbi
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Generate the RFC 3161 signing certificate chain on first configuration. This
+# is idempotent: an existing chain is never overwritten (rotation is an explicit
+# user action). Only the ownership/permissions are re-applied so the container
+# can always read the signer material.
+
+import os
+import sys
+import json
+import subprocess
+
+data = json.load(sys.stdin)
+host = data.get("host", "")
+
+certdir = os.path.expanduser("~/.config/state/certs")
+os.makedirs(certdir, exist_ok=True)
+
+# tsa-gen-cert lives in imageroot/bin, two levels up from this action directory.
+bindir = os.path.join(os.path.dirname(__file__), "..", "..", "bin")
+gen = os.path.join(bindir, "tsa-gen-cert")
+
+root_cn = os.environ.get("TSA_ROOT_CA_CN") or (f"{host} TSA Root CA" if host else "TSA Root CA")
+leaf_cn = os.environ.get("TSA_LEAF_CN") or (f"{host} TSA" if host else "Timestamp Authority")
+
+subprocess.run(
+    [gen, certdir, "--root-cn", root_cn, "--leaf-cn", leaf_cn],
+    check=True,
+)

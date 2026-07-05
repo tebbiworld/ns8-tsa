@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 tebbi
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Seed the initial environment for a fresh TSA instance: pick the allocated TCP
+# port and generate the password that protects the encrypted leaf signing key.
+# The certificate chain itself is created later by configure-module, once the
+# host name (used for the default Root CA common name) is known.
+
+import os
+import secrets
+
+import agent
+
+# The node allocates org.nethserver.tcp-ports-demand ports and exposes them as a
+# comma-separated TCP_PORTS list. We reserve a single port for the timestamp
+# server, bound to 127.0.0.1 and fronted by Traefik.
+tcp_ports = [p.strip() for p in os.environ.get("TCP_PORTS", "").split(",") if p.strip()]
+tcp_port = tcp_ports[0] if tcp_ports else "3000"
+agent.set_env("TCP_PORT", tcp_port)
+
+# Password for the aes-256-cbc encrypted PKCS#8 leaf key. Generated once and
+# kept in the module configuration; it is passed to the timestamp-server via
+# --file-signer-passwd.
+agent.set_env("TSA_KEY_PASSWORD", secrets.token_urlsafe(24))
+
+# Persist the environment for the systemd unit and later actions.
+agent.dump_env()

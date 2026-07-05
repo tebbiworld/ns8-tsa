@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 tebbi
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Publish the timestamp authority through Traefik on a single host name. All TSA
+# endpoints (POST /api/v1/timestamp, GET /api/v1/timestamp/certchain, GET /ping)
+# live under the same host, so one catch-all route is enough.
+#
+# Note: this only configures the HTTPS *transport*. Let's Encrypt here issues the
+# TLS certificate Traefik serves to clients; it has nothing to do with the RFC
+# 3161 signing certificate, which is the self-signed long-lived chain.
+
+import os
+import sys
+import json
+
+import agent
+
+data = json.load(sys.stdin)
+
+host = data["host"]
+h2hs = data.get("http2https", True)
+module_id = os.environ["MODULE_ID"]
+tcp_port = os.environ["TCP_PORT"]
+
+route = {
+    "instance": module_id,
+    "url": "http://127.0.0.1:" + tcp_port,
+    "host": host,
+    "http2https": h2hs,
+    "lets_encrypt_check": True,
+    "lets_encrypt_cleanup": True,
+}
+if "lets_encrypt" in data:
+    route["lets_encrypt"] = data["lets_encrypt"]
+
+agent.set_route(route)

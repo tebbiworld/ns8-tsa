@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 tebbi
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Return the current configuration for the Settings UI: the Traefik transport
+# settings plus a summary of the active RFC 3161 signing certificate read from
+# the chain (subject, expiry, SHA-256 fingerprint, Root CA common name).
+
+import os
+import sys
+import json
+import subprocess
+
+import agent
+
+certdir = os.path.expanduser("~/.config/state/certs")
+chain_path = os.path.join(certdir, "tsa-chain.pem")
+
+
+def _openssl_field(args, prefix):
+    try:
+        out = subprocess.run(
+            ["openssl", "x509", *args],
+            capture_output=True, text=True, check=True,
+        ).stdout
+    except subprocess.CalledProcessError:
+        return ""
+    for line in out.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix):].strip()
+    return out.strip()
+
+
+def _leaf_info():
+    info = {"present": False, "subject": "", "not_after": "", "fingerprint": ""}
+    if not os.path.exists(chain_path):
+        return info
+    info["present"] = True
+    # openssl x509 reads the first certificate in the file: the leaf/signer.
+    info["subject"] = _openssl_field(["-in", chain_path, "-noout", "-subject"], "subject=")
+    info["not_after"] = _openssl_field(["-in", chain_path, "-noout", "-enddate"], "notAfter=")
+    info["fingerprint"] = _openssl_field(
+        ["-in", chain_path, "-noout", "-fingerprint", "-sha256"], "sha256 Fingerprint="
+    )
+    return info
+
+
+def _root_cn():
+    if not os.path.exists(chain_path):
+        return os.environ.get("TSA_ROOT_CA_CN", "")
+    try:
+        with open(chain_path) as fp:
+            data = fp.read()
+    except OSError:
+        return os.environ.get("TSA_ROOT_CA_CN", "")
+    blocks = [b for b in data.split("-----END CERTIFICATE-----") if "BEGIN CERTIFICATE" in b]
+    if not blocks:
+        return os.environ.get("TSA_ROOT_CA_CN", "")
+    last = blocks[-1] + "-----END CERTIFICATE-----\n"
+    proc = subprocess.run(
+        ["openssl", "x509", "-noout", "-subject"],
+        input=last, capture_output=True, text=True,
+    )
+    subject = proc.stdout.strip()
+    return subject[len("subject="):].strip() if subject.startswith("subject=") else subject
+
+
+host = os.getenv("TRAEFIK_HOST", "")
+leaf = _leaf_info()
+
+config = {
+    "host": host,
+    "http2https": os.getenv("TRAEFIK_HTTP2HTTPS") == "True",
+    "lets_encrypt": agent.get_route(os.environ["MODULE_ID"]).get("lets_encrypt", False),
+    "tsa_url": f"https://{host}/api/v1/timestamp" if host else "",
+    "certchain_url": f"https://{host}/api/v1/timestamp/certchain" if host else "",
+    "cert_present": leaf["present"],
+    "cert_subject": leaf["subject"],
+    "cert_not_after": leaf["not_after"],
+    "cert_fingerprint": leaf["fingerprint"],
+    "root_ca_cn": _root_cn(),
+}
+
+json.dump(config, fp=sys.stdout)

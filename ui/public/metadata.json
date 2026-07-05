@@ -1,0 +1,17 @@
+{
+  "name": "TSA",
+  "description": {
+    "en": "RFC 3161 timestamp authority (trusted timestamping)",
+    "de": "RFC-3161-Zeitstempeldienst (vertrauenswürdige Zeitstempel)"
+  },
+  "categories": ["security"],
+  "authors": [
+    { "name": "tebbi", "email": "info@ebbinghaus.world" }
+  ],
+  "docs": {
+    "documentation_url": "https://github.com/tebbiworld/ns8-tsa/blob/main/README.md",
+    "bug_url": "https://github.com/tebbiworld/ns8-tsa/issues",
+    "code_url": "https://github.com/tebbiworld/ns8-tsa"
+  },
+  "source": "ghcr.io/tebbiworld/tsa"
+}

@@ -1,0 +1,19 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "get-configuration output",
+    "$id": "http://schema.nethserver.org/tsa/get-configuration-output.json",
+    "description": "Get tsa configuration",
+    "type": "object",
+    "properties": {
+        "host": { "type": "string" },
+        "http2https": { "type": "boolean" },
+        "lets_encrypt": { "type": "boolean" },
+        "tsa_url": { "type": "string" },
+        "certchain_url": { "type": "string" },
+        "cert_present": { "type": "boolean" },
+        "cert_subject": { "type": "string" },
+        "cert_not_after": { "type": "string" },
+        "cert_fingerprint": { "type": "string" },
+        "root_ca_cn": { "type": "string" }
+    }
+}

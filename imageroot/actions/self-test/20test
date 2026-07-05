@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 tebbi
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# End-to-end self test of the timestamp authority, executed on the node:
+#   1. GET /ping                              -> service is up
+#   2. openssl ts -query | POST timestamp     -> HTTP 200
+#   3. openssl ts -reply  ... Status: Granted -> a token was issued
+#   4. openssl ts -verify ... against chain   -> the token verifies
+#
+# Returns a structured result for the UI.
+
+import os
+import sys
+import json
+import tempfile
+import subprocess
+import urllib.request
+
+# Consume stdin to follow the action protocol (no input expected).
+try:
+    json.load(sys.stdin)
+except Exception:
+    pass
+
+port = os.environ.get("TCP_PORT", "3000")
+certdir = os.path.expanduser("~/.config/state/certs")
+chain_path = os.path.join(certdir, "tsa-chain.pem")
+
+result = {
+    "ping_ok": False,
+    "http_status": 0,
+    "granted": False,
+    "verify_ok": False,
+    "message": "",
+}
+
+# 1) /ping
+try:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/ping", timeout=5) as r:
+        result["ping_ok"] = r.status == 200
+except Exception as exc:
+    result["message"] = f"ping failed: {exc}"
+    json.dump(result, fp=sys.stdout)
+    sys.exit(0)
+
+with tempfile.TemporaryDirectory() as tmp:
+    data_file = os.path.join(tmp, "data.bin")
+    tsq = os.path.join(tmp, "request.tsq")
+    tsr = os.path.join(tmp, "response.tsr")
+    with open(data_file, "wb") as fp:
+        fp.write(b"ns8-tsa self test\n")
+
+    # 2) build an RFC 3161 request
+    q = subprocess.run(
+        ["openssl", "ts", "-query", "-data", data_file, "-sha256", "-cert", "-out", tsq],
+        capture_output=True, text=True,
+    )
+    if q.returncode != 0:
+        result["message"] = "openssl ts -query failed: " + (q.stderr or "").strip()
+        json.dump(result, fp=sys.stdout)
+        sys.exit(0)
+
+    with open(tsq, "rb") as fp:
+        query_bytes = fp.read()
+
+    # ...POST it to the timestamp endpoint
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/v1/timestamp",
+        data=query_bytes,
+        headers={"Content-Type": "application/timestamp-query"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result["http_status"] = resp.status
+            reply_bytes = resp.read()
+    except urllib.error.HTTPError as exc:
+        result["http_status"] = exc.code
+        result["message"] = f"timestamp request returned HTTP {exc.code}"
+        json.dump(result, fp=sys.stdout)
+        sys.exit(0)
+    except Exception as exc:
+        result["message"] = f"timestamp request failed: {exc}"
+        json.dump(result, fp=sys.stdout)
+        sys.exit(0)
+
+    with open(tsr, "wb") as fp:
+        fp.write(reply_bytes)
+
+    # 3) token granted?
+    reply = subprocess.run(
+        ["openssl", "ts", "-reply", "-in", tsr, "-text"],
+        capture_output=True, text=True,
+    )
+    result["granted"] = "Granted" in reply.stdout
+
+    # 4) verify the token against our own chain
+    verify = subprocess.run(
+        ["openssl", "ts", "-verify", "-data", data_file, "-in", tsr, "-CAfile", chain_path],
+        capture_output=True, text=True,
+    )
+    result["verify_ok"] = verify.returncode == 0 and "OK" in verify.stdout
+    if not result["verify_ok"]:
+        result["message"] = (verify.stderr or verify.stdout or "verification failed").strip()[:300]
+    elif result["granted"]:
+        result["message"] = "Timestamp granted and verified against the local chain."
+
+json.dump(result, fp=sys.stdout)

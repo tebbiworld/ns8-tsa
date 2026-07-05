@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 tebbi
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Install an externally obtained timestamping certificate (e.g. a commercial
+# RFC 3161 certificate). The upload is validated *before* anything is touched:
+#
+#   * the chain must parse and expose a leaf certificate,
+#   * the leaf must carry the critical extendedKeyUsage=timeStamping,
+#   * the supplied private key must match the leaf public key
+#     (and decrypt with the given passphrase).
+#
+# Only then is the current chain archived and the new material installed. The
+# leaf key is re-encrypted with the module's TSA_KEY_PASSWORD so the systemd
+# unit keeps working unchanged. If the timestamp server fails to come back
+# healthy, the previous chain is restored (rollback).
+
+import os
+import re
+import sys
+import json
+import time
+import shutil
+import datetime
+import subprocess
+import urllib.request
+
+import agent
+
+KEEP_FILES = ["tsa-root-key.pem", "tsa-root.pem", "tsa-leaf.pem",
+              "tsa-chain.pem", "tsa-leaf-key-enc.pem"]
+
+certdir = os.path.expanduser("~/.config/state/certs")
+statedir = os.path.dirname(certdir)
+bindir = os.path.join(os.path.dirname(__file__), "..", "..", "bin")
+gen = os.path.join(bindir, "tsa-gen-cert")
+workdir = os.path.join(statedir, ".upload-tmp")
+
+
+def fail(field, error, value=""):
+    agent.set_status("validation-failed")
+    json.dump([{"field": field, "parameter": field, "value": value, "error": error}], fp=sys.stdout)
+    sys.exit(2)
+
+
+def first_cert(pem):
+    m = re.search(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", pem, re.DOTALL)
+    return m.group(0) + "\n" if m else None
+
+
+def last_cert(pem):
+    blocks = re.findall(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", pem, re.DOTALL)
+    return blocks[-1] + "\n" if blocks else None
+
+
+data = json.load(sys.stdin)
+chain_pem = data["chain"]
+key_pem = data["key"]
+passphrase = data.get("passphrase", "")
+
+# Clean scratch space.
+shutil.rmtree(workdir, ignore_errors=True)
+os.makedirs(workdir, exist_ok=True)
+os.chmod(workdir, 0o700)
+
+
+def wpath(name):
+    return os.path.join(workdir, name)
+
+
+try:
+    leaf_pem = first_cert(chain_pem)
+    if not leaf_pem:
+        fail("chain", "invalid_chain")
+
+    with open(wpath("chain.pem"), "w") as fp:
+        fp.write(chain_pem)
+    with open(wpath("leaf.pem"), "w") as fp:
+        fp.write(leaf_pem)
+    with open(wpath("key.pem"), "w") as fp:
+        fp.write(key_pem)
+
+    # 1) Leaf must parse.
+    if subprocess.run(["openssl", "x509", "-in", wpath("leaf.pem"), "-noout"],
+                      capture_output=True).returncode != 0:
+        fail("chain", "invalid_chain")
+
+    # 2) Critical timeStamping EKU.
+    eku = subprocess.run(
+        ["openssl", "x509", "-in", wpath("leaf.pem"), "-noout", "-ext", "extendedKeyUsage"],
+        capture_output=True, text=True,
+    ).stdout
+    if "Time Stamping" not in eku or "critical" not in eku:
+        fail("chain", "missing_timestamping_eku")
+
+    # 3) Passphrase must decrypt the key and its public part must match the leaf.
+    env = dict(os.environ, UP_PASS=passphrase)
+    keypub = subprocess.run(
+        ["openssl", "pkey", "-in", wpath("key.pem"), "-passin", "env:UP_PASS", "-pubout"],
+        capture_output=True, text=True, env=env,
+    )
+    if keypub.returncode != 0:
+        fail("passphrase", "invalid_passphrase")
+    certpub = subprocess.run(
+        ["openssl", "x509", "-in", wpath("leaf.pem"), "-noout", "-pubkey"],
+        capture_output=True, text=True,
+    ).stdout
+    if keypub.stdout.strip() != certpub.strip():
+        fail("key", "key_mismatch")
+
+    # 4) Re-encrypt the leaf key with the module password.
+    reenc = subprocess.run(
+        ["openssl", "pkcs8", "-topk8", "-in", wpath("key.pem"),
+         "-passin", "env:UP_PASS", "-out", wpath("tsa-leaf-key-enc.pem"),
+         "-v2", "aes-256-cbc", "-passout", "env:TSA_KEY_PASSWORD"],
+        capture_output=True, text=True, env=env,
+    )
+    if reenc.returncode != 0:
+        fail("key", "key_mismatch", (reenc.stderr or "").strip()[:300])
+
+    # --- validation passed: archive current chain and install the new one ---
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    archive_dir = os.path.join(statedir, "cert-archive", stamp)
+    os.makedirs(archive_dir, exist_ok=True)
+    for name in KEEP_FILES:
+        src = os.path.join(certdir, name)
+        if os.path.exists(src):
+            # rename works on 65532-owned files (needs dir write only).
+            os.rename(src, os.path.join(archive_dir, name))
+
+    # Install new material. No root key for an externally supplied certificate.
+    shutil.copy(wpath("chain.pem"), os.path.join(certdir, "tsa-chain.pem"))
+    shutil.copy(wpath("leaf.pem"), os.path.join(certdir, "tsa-leaf.pem"))
+    shutil.copy(wpath("tsa-leaf-key-enc.pem"), os.path.join(certdir, "tsa-leaf-key-enc.pem"))
+    root_pem = last_cert(chain_pem)
+    if root_pem:
+        with open(os.path.join(certdir, "tsa-root.pem"), "w") as fp:
+            fp.write(root_pem)
+
+    subprocess.run([gen, certdir, "--fix-perms"], check=True)
+    subprocess.run(["systemctl", "--user", "restart", "tsa.service"], check=True)
+
+    # Health check: rollback if the server does not answer /ping.
+    port = os.environ.get("TCP_PORT", "3000")
+    healthy = False
+    for _ in range(20):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/ping", timeout=2) as r:
+                if r.status == 200:
+                    healthy = True
+                    break
+        except Exception:
+            time.sleep(1)
+
+    if not healthy:
+        # rollback
+        for name in KEEP_FILES:
+            dst = os.path.join(certdir, name)
+            if os.path.exists(dst):
+                os.remove(dst)
+            saved = os.path.join(archive_dir, name)
+            if os.path.exists(saved):
+                os.rename(saved, dst)
+        subprocess.run([gen, certdir, "--fix-perms"], check=False)
+        subprocess.run(["systemctl", "--user", "restart", "tsa.service"], check=False)
+        fail("chain", "server_rejected_certificate")
+
+    json.dump({"archived_to": archive_dir}, fp=sys.stdout)
+finally:
+    shutil.rmtree(workdir, ignore_errors=True)

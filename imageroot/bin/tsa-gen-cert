@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 tebbi
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# tsa-gen-cert - manage the TSA signing certificate chain.
+#
+# This is the single source of truth for the RFC 3161 signing material. It is
+# called by the configure-module (first-run generation), regenerate-certificate
+# (forced rotation) and upload-certificate (permission fix) actions.
+#
+# The chain is a self-signed EC P-384 two-level hierarchy with long validities,
+# exactly the sequence verified against the sigstore timestamp-server, with the
+# validities extended to ~25 years (leaf) / ~30 years (root):
+#
+#   Root CA : basicConstraints critical CA:TRUE, keyUsage critical
+#             keyCertSign,cRLSign, 10950 days.
+#   Leaf    : basicConstraints critical CA:FALSE, keyUsage critical
+#             digitalSignature, extendedKeyUsage critical timeStamping,
+#             9125 days. A Let's Encrypt certificate can NOT be used here:
+#             RFC 3161 requires the critical timeStamping EKU and the server
+#             refuses to start without it.
+#
+# The leaf key is stored as an aes-256-cbc encrypted PKCS#8 file. The password
+# comes from the TSA_KEY_PASSWORD environment variable (generated at module
+# creation and kept in the module configuration).
+#
+# Permissions (critical): the distroless timestamp-server runs as UID 65532 and
+# can not read files owned by the module user. Every certificate file is
+# therefore chown'ed to 65532:65532 through `podman unshare` (rootless subuid
+# mapping); the leaf key is 0600, the root key 0400, the public material 0644.
+# The directory itself stays owned by the module user (mode 0755) so the
+# container - which sees the module user as root - can traverse it.
+
+import os
+import sys
+import shutil
+import argparse
+import datetime
+import subprocess
+
+ROOT_DAYS = "10950"   # ~30 years
+LEAF_DAYS = "9125"    # ~25 years
+
+# name -> octal mode. Files not listed are removed after generation.
+KEEP_FILES = {
+    "tsa-root-key.pem": 0o400,
+    "tsa-root.pem": 0o644,
+    "tsa-leaf.pem": 0o644,
+    "tsa-chain.pem": 0o644,
+    "tsa-leaf-key-enc.pem": 0o600,
+}
+TEMP_FILES = ["tsa-leaf-key.pem", "tsa-leaf.csr", "leaf.ext", "tsa-root.srl"]
+TSA_UID_GID = "65532:65532"
+
+
+def run(cmd, **kw):
+    subprocess.run(cmd, check=True, **kw)
+
+
+def fix_permissions(certdir):
+    """Set file modes and hand ownership of the cert files to the container UID."""
+    os.chmod(certdir, 0o755)
+    present = []
+    for name, mode in KEEP_FILES.items():
+        path = os.path.join(certdir, name)
+        if os.path.exists(path):
+            os.chmod(path, mode)
+            present.append(path)
+    if present:
+        # chown to 65532:65532 so the distroless timestamp-server (UID 65532)
+        # can read the signer material. In the normal rootless module context
+        # this must go through the user namespace (`podman unshare`); if we are
+        # already the real root (rootful podman) a plain chown works instead.
+        try:
+            run(["podman", "unshare", "chown", TSA_UID_GID, *present],
+                stderr=subprocess.DEVNULL)
+        except subprocess.CalledProcessError:
+            for path in present:
+                os.chown(path, 65532, 65532)
+
+
+def archive_existing(certdir):
+    """Move the current chain aside so tokens issued with it stay verifiable."""
+    existing = [n for n in list(KEEP_FILES) if os.path.exists(os.path.join(certdir, n))]
+    if not existing:
+        return None
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    archive_dir = os.path.join(os.path.dirname(certdir), "cert-archive", stamp)
+    os.makedirs(archive_dir, exist_ok=True)
+    for name in existing:
+        # os.rename works even on files owned by 65532: it only needs write
+        # permission on the (module-user owned) directory, not on the file.
+        os.rename(os.path.join(certdir, name), os.path.join(archive_dir, name))
+    return archive_dir
+
+
+def generate(certdir, root_cn, leaf_cn):
+    password = os.environ.get("TSA_KEY_PASSWORD")
+    if not password:
+        sys.stderr.write("TSA_KEY_PASSWORD is not set; cannot generate the encrypted leaf key\n")
+        sys.exit(1)
+
+    def p(name):
+        return os.path.join(certdir, name)
+
+    # Root CA - self-signed, CA:TRUE, keyCertSign/cRLSign.
+    run([
+        "openssl", "req", "-x509", "-newkey", "ec",
+        "-pkeyopt", "ec_paramgen_curve:P-384", "-nodes",
+        "-keyout", p("tsa-root-key.pem"), "-out", p("tsa-root.pem"),
+        "-days", ROOT_DAYS, "-subj", "/CN=" + root_cn,
+        "-addext", "basicConstraints=critical,CA:TRUE",
+        "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+    ])
+
+    # Leaf CSR.
+    run([
+        "openssl", "req", "-newkey", "ec",
+        "-pkeyopt", "ec_paramgen_curve:P-384", "-nodes",
+        "-keyout", p("tsa-leaf-key.pem"), "-out", p("tsa-leaf.csr"),
+        "-subj", "/CN=" + leaf_cn,
+    ])
+
+    # Leaf extensions - the critical timeStamping EKU is what makes this a
+    # valid RFC 3161 signing certificate.
+    with open(p("leaf.ext"), "w") as fp:
+        fp.write("basicConstraints=critical,CA:FALSE\n")
+        fp.write("keyUsage=critical,digitalSignature\n")
+        fp.write("extendedKeyUsage=critical,timeStamping\n")
+
+    # Sign the leaf with the root CA.
+    run([
+        "openssl", "x509", "-req", "-in", p("tsa-leaf.csr"),
+        "-CA", p("tsa-root.pem"), "-CAkey", p("tsa-root-key.pem"),
+        "-CAcreateserial", "-out", p("tsa-leaf.pem"),
+        "-days", LEAF_DAYS, "-extfile", p("leaf.ext"),
+    ])
+
+    # Chain = leaf followed by root.
+    with open(p("tsa-chain.pem"), "wb") as out:
+        for name in ("tsa-leaf.pem", "tsa-root.pem"):
+            with open(p(name), "rb") as src:
+                out.write(src.read())
+
+    # Encrypt the leaf key as PKCS#8 / aes-256-cbc using TSA_KEY_PASSWORD.
+    run([
+        "openssl", "pkcs8", "-topk8",
+        "-in", p("tsa-leaf-key.pem"), "-out", p("tsa-leaf-key-enc.pem"),
+        "-v2", "aes-256-cbc", "-passout", "env:TSA_KEY_PASSWORD",
+    ])
+
+    # Drop the plaintext key and other transient material.
+    for name in TEMP_FILES:
+        try:
+            os.remove(p(name))
+        except FileNotFoundError:
+            pass
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Manage the TSA signing certificate chain")
+    ap.add_argument("certdir", help="certificate directory")
+    ap.add_argument("--root-cn", default="TSA Root CA", help="Root CA common name")
+    ap.add_argument("--leaf-cn", default="Timestamp Authority", help="Leaf common name")
+    ap.add_argument("--force", action="store_true", help="archive and regenerate an existing chain")
+    ap.add_argument("--fix-perms", action="store_true", help="only re-apply ownership/permissions")
+    args = ap.parse_args()
+
+    os.makedirs(args.certdir, exist_ok=True)
+    chain = os.path.join(args.certdir, "tsa-chain.pem")
+
+    if args.fix_perms:
+        fix_permissions(args.certdir)
+        return
+
+    if args.force:
+        archived = archive_existing(args.certdir)
+        if archived:
+            sys.stderr.write("Archived previous chain to %s\n" % archived)
+        generate(args.certdir, args.root_cn, args.leaf_cn)
+    elif not os.path.exists(chain):
+        generate(args.certdir, args.root_cn, args.leaf_cn)
+    # else: idempotent - keep the existing chain untouched.
+
+    fix_permissions(args.certdir)
+
+
+if __name__ == "__main__":
+    main()

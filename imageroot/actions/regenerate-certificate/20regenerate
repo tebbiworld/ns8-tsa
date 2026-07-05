@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 tebbi
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Rotate the TSA signing chain. The current chain is archived (with a timestamp)
+# so that timestamp tokens issued with it remain verifiable, then a fresh
+# self-signed EC P-384 chain is generated and the timestamp server restarted.
+#
+# WARNING: after rotation, clients must trust the NEW Root CA. Tokens issued
+# before the rotation can only be verified against the archived chain.
+
+import os
+import sys
+import json
+import subprocess
+
+import agent
+
+data = json.load(sys.stdin)
+
+host = os.environ.get("TRAEFIK_HOST", "")
+root_cn = (data.get("root_ca_cn") or "").strip() or \
+    os.environ.get("TSA_ROOT_CA_CN") or (f"{host} TSA Root CA" if host else "TSA Root CA")
+leaf_cn = os.environ.get("TSA_LEAF_CN") or (f"{host} TSA" if host else "Timestamp Authority")
+
+# Persist the chosen Root CA common name for future default prefills.
+agent.set_env("TSA_ROOT_CA_CN", root_cn)
+agent.dump_env()
+
+certdir = os.path.expanduser("~/.config/state/certs")
+bindir = os.path.join(os.path.dirname(__file__), "..", "..", "bin")
+gen = os.path.join(bindir, "tsa-gen-cert")
+
+subprocess.run(
+    [gen, certdir, "--force", "--root-cn", root_cn, "--leaf-cn", leaf_cn],
+    check=True,
+)
+
+# Restart so the server picks up the new signer material.
+subprocess.run(["systemctl", "--user", "restart", "tsa.service"], check=True)
+
+json.dump({"root_ca_cn": root_cn}, fp=sys.stdout)

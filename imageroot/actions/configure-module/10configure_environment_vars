@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 tebbi
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Store the Traefik transport settings (host name, HTTP->HTTPS redirect). These
+# only concern the HTTPS transport in front of the timestamp server, NOT the
+# RFC 3161 signing certificate.
+
+import os
+import sys
+import json
+
+import agent
+
+data = json.load(sys.stdin)
+
+host = data.get("host")
+h2hs = data.get("http2https", True)
+
+agent.set_env("TRAEFIK_HOST", host)
+agent.set_env("TRAEFIK_HTTP2HTTPS", h2hs)
+
+# Default common names for the self-signed signing chain, derived from the host
+# name. Only seeded once so they stay stable across reconfigurations and match
+# whatever is already baked into an existing certificate.
+if not os.environ.get("TSA_ROOT_CA_CN"):
+    agent.set_env("TSA_ROOT_CA_CN", f"{host} TSA Root CA")
+if not os.environ.get("TSA_LEAF_CN"):
+    agent.set_env("TSA_LEAF_CN", f"{host} TSA")
+
+agent.dump_env()

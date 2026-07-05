@@ -1,0 +1,16 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Regenerate TSA certificate",
+    "$id": "http://nethserver.org/json-schema/task/input/tsa/regenerate-certificate",
+    "description": "Archive the current signing chain and generate a fresh self-signed EC P-384 chain",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+        "root_ca_cn": {
+            "type": "string",
+            "title": "Root CA common name",
+            "description": "Common name of the new Root CA. Leave empty to keep the current default.",
+            "maxLength": 128
+        }
+    }
+}
