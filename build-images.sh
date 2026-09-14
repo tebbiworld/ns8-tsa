@@ -18,7 +18,7 @@ reponame="tsa"
 # Pin the RFC 3161 timestamp authority image used at runtime. It is declared in
 # the org.nethserver.images label so the node agent pre-pulls it and exposes its
 # reference to the systemd unit as ${TIMESTAMP_SERVER_IMAGE}.
-timestamp_server_image="ghcr.io/sigstore/timestamp-server:v2.1.2"
+timestamp_server_image="ghcr.io/sigstore/timestamp-server:v2.1.3"
 
 # Create a new empty container image
 container=$(buildah from scratch)
