@@ -1,0 +1,16 @@
+#!/bin/bash
+
+#
+# Copyright (C) 2026 tebbi
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# The core's update-module action pulls the new images and runs these hooks but
+# does not restart the module's units, so a new pinned upstream image (or a
+# changed unit file) would only take effect at the next reboot. Restart here.
+
+set -e
+exec 1>&2
+
+systemctl --user daemon-reload
+systemctl --user restart tsa.service
