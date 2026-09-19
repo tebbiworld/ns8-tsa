@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 tebbi
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Re-apply the restored settings: every field configure-module accepts is
+# passed. The restored certificates are kept (certificate generation is
+# idempotent).
+
+import os
+
+import agent
+
+env = os.environ
+
+data = {
+    "host": env["TRAEFIK_HOST"],
+    "http2https": env.get("TRAEFIK_HTTP2HTTPS", "True") == "True",
+    "lets_encrypt": env.get("TRAEFIK_LETS_ENCRYPT", "False") == "True",
+}
+response = agent.tasks.run(agent_id=env["AGENT_ID"], action="configure-module", data=data)
+agent.assert_exp(response["exit_code"] == 0, "The configure-module subtask failed!")
