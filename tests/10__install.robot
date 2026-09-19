@@ -36,6 +36,10 @@ Remember the signing certificate before the update
 
 Update to the image under test
     Skip If    '${SCENARIO}' != 'update'    scenario is ${SCENARIO}
+    # Releases up to 1.0.2 cannot be updated as they are (the core's chown -R
+    # fails on the sub-UID owned certificate files). This is the documented
+    # one-line repair from the README; from 1.1.0 on it is not needed any more.
+    Run on node    runagent -m ${module_id} bash -c 'podman unshare chown -R 0:0 "$AGENT_STATE_DIR/certs"; [ ! -d "$AGENT_STATE_DIR/cert-archive" ] || podman unshare chown -R 0:0 "$AGENT_STATE_DIR/cert-archive"'
     Run on node    api-cli run update-module --data '{"force":true,"module_url":"${IMAGE_URL}","instances":["${module_id}"]}'
     Wait Until Keyword Succeeds    30 times    10 seconds    Timestamp is granted and verified    ${module_id}
     # same key and chain: the migrated password still decrypts the key
@@ -43,6 +47,9 @@ Update to the image under test
     Should Be Equal    ${fp}    ${CHAIN_BEFORE}
     # and with the fixed release a second save works on the upgraded instance too
     Run task    module/${module_id}/configure-module    ${CONFIG}    decode_json=${FALSE}
+    Wait Until Keyword Succeeds    30 times    10 seconds    Timestamp is granted and verified    ${module_id}
+    # the instance must be updatable again without any repair
+    Run on node    api-cli run update-module --data '{"force":true,"module_url":"${IMAGE_URL}","instances":["${module_id}"]}'
     Wait Until Keyword Succeeds    30 times    10 seconds    Timestamp is granted and verified    ${module_id}
 
 Configuration reads back
@@ -55,6 +62,10 @@ The key password is not on the command line
 
 Secrets are stored in passwords.env only
     Secrets are kept out of the module environment    ${module_id}
+
+The certificate files belong to the module user
+    ${owners} =    Run on node    runagent -m ${module_id} bash -c 'stat -c \%U "$AGENT_STATE_DIR"/certs/* | sort -u'
+    Should Be Equal As Strings    ${owners.strip()}    ${module_id}
 
 *** Keywords ***
 Timestamp is granted and verified
