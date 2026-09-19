@@ -51,6 +51,13 @@ Back up the module to the cluster repository
 
 Restore the module from the cluster repository
     [Arguments]    ${repo_id}    ${path}
-    ${out} =    Run task    cluster/restore-module
-    ...    {"repository":"${repo_id}","path":"${path}","snapshot":"","node":1,"replace":false}
+    ${stdout}    ${stderr}    ${rc} =    Execute Command
+    ...    api-cli run cluster/restore-module --data '{"repository":"${repo_id}","path":"${path}","snapshot":"","node":1,"replace":false}'
+    ...    return_stdout=True    return_stderr=True    return_rc=True
+    IF    ${rc} != 0
+        # the task error alone says little: show which restore step failed and why
+        ${journal} =    Execute Command    journalctl --since "-10 min" --no-pager -o cat | grep -E "restore-module|configure-module|Traceback|Error|error|denied|status is" | grep -v "container " | tail -n 60
+        Fail    restore-module failed (rc=${rc})${\n}${stderr}${\n}--- journal ---${\n}${journal}
+    END
+    ${out} =    Evaluate    json.loads(r'''${stdout}''')    modules=json
     RETURN    ${out['module_id']}
