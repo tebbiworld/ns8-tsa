@@ -72,19 +72,24 @@ def fix_permissions(certdir):
     for name, mode in KEEP_FILES.items():
         path = os.path.join(certdir, name)
         if os.path.exists(path):
+            present.append((path, mode))
+    if not present:
+        return
+    # The files end up owned by 65532:65532 so the distroless timestamp-server
+    # (UID 65532) can read the signer material. Once they are, the module user
+    # may no longer chmod them directly: on a second configure-module, and after
+    # a restore (restic brings the ownership back), a plain os.chmod() fails with
+    # EPERM. In the rootless module context both chmod and chown therefore go
+    # through the user namespace (`podman unshare`), where the module user is
+    # root; if we are already the real root (rootful podman) plain calls work.
+    if os.geteuid() == 0:
+        for path, mode in present:
             os.chmod(path, mode)
-            present.append(path)
-    if present:
-        # chown to 65532:65532 so the distroless timestamp-server (UID 65532)
-        # can read the signer material. In the normal rootless module context
-        # this must go through the user namespace (`podman unshare`); if we are
-        # already the real root (rootful podman) a plain chown works instead.
-        try:
-            run(["podman", "unshare", "chown", TSA_UID_GID, *present],
-                stderr=subprocess.DEVNULL)
-        except subprocess.CalledProcessError:
-            for path in present:
-                os.chown(path, 65532, 65532)
+            os.chown(path, 65532, 65532)
+        return
+    for path, mode in present:
+        run(["podman", "unshare", "chmod", "%o" % mode, path])
+    run(["podman", "unshare", "chown", TSA_UID_GID, *[path for path, _ in present]])
 
 
 def archive_existing(certdir):

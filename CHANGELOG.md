@@ -14,6 +14,10 @@ Alignment with the NethServer module conventions (NethServer/agents skills).
 - **Working restore.** New `restore-module` steps bring the original key back into service and re-apply the settings.
 - `update-module` only restarts a running instance.
 
+### Fixed
+
+- Certificate permissions are set through the user namespace. Once the files belonged to the server user, a direct `chmod` by the module user failed, which broke `configure-module` after a restore.
+
 ### Added
 
 - Robot Framework tests (install, update from the previous release, backup and restore, each with a real signed and verified timestamp) run on real NS8 nodes through `stephdl/ns8-ci-actions`.
