@@ -22,6 +22,9 @@ h2hs = data.get("http2https", True)
 
 agent.set_env("TRAEFIK_HOST", host)
 agent.set_env("TRAEFIK_HTTP2HTTPS", h2hs)
+if "lets_encrypt" in data:
+    # kept so restore-module can re-create the route with the same setting
+    agent.set_env("TRAEFIK_LETS_ENCRYPT", data["lets_encrypt"])
 
 # Default common names for the self-signed signing chain, derived from the host
 # name. Only seeded once so they stay stable across reconfigurations and match
@@ -31,4 +34,3 @@ if not os.environ.get("TSA_ROOT_CA_CN"):
 if not os.environ.get("TSA_LEAF_CN"):
     agent.set_env("TSA_LEAF_CN", f"{host} TSA")
 
-agent.dump_env()

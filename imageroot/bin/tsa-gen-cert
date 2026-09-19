@@ -27,12 +27,10 @@
 # comes from the TSA_KEY_PASSWORD environment variable (generated at module
 # creation and kept in the module configuration).
 #
-# Permissions (critical): the distroless timestamp-server runs as UID 65532 and
-# can not read files owned by the module user. Every certificate file is
-# therefore chown'ed to 65532:65532 through `podman unshare` (rootless subuid
-# mapping); the leaf key is 0600, the root key 0400, the public material 0644.
-# The directory itself stays owned by the module user (mode 0755) so the
-# container - which sees the module user as root - can traverse it.
+# Permissions: the distroless timestamp-server runs as UID 65532. The unit maps
+# the module user to that UID (--userns=keep-id:uid=65532,gid=65532), so every
+# certificate file simply stays owned by the module user; the leaf key is 0600,
+# the root key 0400, the public material 0644. See fix_permissions().
 
 import os
 import sys
@@ -40,6 +38,10 @@ import shutil
 import argparse
 import datetime
 import subprocess
+# The key password lives in state/passwords.env, not in the module environment;
+# openssl reads it from the process environment ("-passout env:...").
+import modsecrets  # noqa: E402
+modsecrets.export_to_environ("TSA_KEY_PASSWORD")
 
 ROOT_DAYS = "10950"   # ~30 years
 LEAF_DAYS = "9125"    # ~25 years
@@ -53,7 +55,6 @@ KEEP_FILES = {
     "tsa-leaf-key-enc.pem": 0o600,
 }
 TEMP_FILES = ["tsa-leaf-key.pem", "tsa-leaf.csr", "leaf.ext", "tsa-root.srl"]
-TSA_UID_GID = "65532:65532"
 
 
 def run(cmd, **kw):
@@ -61,25 +62,37 @@ def run(cmd, **kw):
 
 
 def fix_permissions(certdir):
-    """Set file modes and hand ownership of the cert files to the container UID."""
+    """Set the file modes. The files stay owned by the module user.
+
+    The distroless timestamp-server runs as UID 65532. The unit starts it with
+    --userns=keep-id:uid=65532,gid=65532, which maps the module user to exactly
+    that UID inside the container, so the server can read files that, on the
+    node, simply belong to the module user.
+
+    Up to 1.0.2 the files were chown'ed to the mapped sub-UID instead. That
+    made every update-module fail (the core runs "chown -R" over the module
+    directory) and the second configure-module too (no chmod on a file one
+    does not own). Files still owned by a sub-UID, from an old installation or
+    an old backup, are taken back through the user namespace first.
+    """
     os.chmod(certdir, 0o755)
-    present = []
-    for name, mode in KEEP_FILES.items():
-        path = os.path.join(certdir, name)
-        if os.path.exists(path):
-            os.chmod(path, mode)
-            present.append(path)
-    if present:
-        # chown to 65532:65532 so the distroless timestamp-server (UID 65532)
-        # can read the signer material. In the normal rootless module context
-        # this must go through the user namespace (`podman unshare`); if we are
-        # already the real root (rootful podman) a plain chown works instead.
-        try:
-            run(["podman", "unshare", "chown", TSA_UID_GID, *present],
-                stderr=subprocess.DEVNULL)
-        except subprocess.CalledProcessError:
-            for path in present:
-                os.chown(path, 65532, 65532)
+    present = [(os.path.join(certdir, name), mode) for name, mode in KEEP_FILES.items()
+               if os.path.exists(os.path.join(certdir, name))]
+    me = os.geteuid()
+    # everything below certs/ and cert-archive/ (archived generations keep the
+    # ownership they had): a single foreign file is enough to break update-module
+    foreign = []
+    for top in (certdir, os.path.join(os.path.dirname(certdir), "cert-archive")):
+        for root, dirs, files in os.walk(top):
+            for name in dirs + files:
+                path = os.path.join(root, name)
+                if os.lstat(path).st_uid != me:
+                    foreign.append(path)
+    if foreign and me != 0:
+        # inside the user namespace the module user is root: one batched call
+        run(["podman", "unshare", "chown", "-h", "0:0", *foreign])
+    for path, mode in present:
+        os.chmod(path, mode)
 
 
 def archive_existing(certdir):

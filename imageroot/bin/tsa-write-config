@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 tebbi
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Write the timestamp-server configuration file that carries the password of
+# the encrypted signing key. The server reads it with --config, so the password
+# is neither in state/environment (mirrored to Redis) nor on the command line of
+# the container (visible in the process list of the node).
+#
+# The file lives next to the key in state/certs (bind-mounted read-only at
+# /certs), mode 0400, owned by the module user like the key itself. The unit
+# maps the module user to the server UID (--userns=keep-id:uid=65532).
+
+import os
+import sys
+
+import modsecrets
+
+state = os.environ.get("AGENT_STATE_DIR") or os.path.expanduser("~/.config/state")
+certdir = os.path.join(state, "certs")
+os.makedirs(certdir, exist_ok=True)
+
+password = modsecrets.get("TSA_KEY_PASSWORD")
+if not password and os.environ.get("TSA_KEY_PASSWORD"):
+    # An installation of 1.0.2 or older whose update did not get as far as the
+    # migration hook (update-module aborts in the core while the certificate
+    # files are still owned by a sub-UID). The unit still loads
+    # state/environment, so finish the move here: the service must come up
+    # again no matter how far the update got.
+    modsecrets.migrate_from_env(["TSA_KEY_PASSWORD"])
+    password = modsecrets.get("TSA_KEY_PASSWORD")
+if not password:
+    print("TSA_KEY_PASSWORD is missing from passwords.env", file=sys.stderr)
+    sys.exit(1)
+
+target = os.path.join(certdir, "timestamp-server.yaml")
+tmp = target + ".tmp"
+old_umask = os.umask(0o077)
+try:
+    with open(tmp, "w") as fp:
+        fp.write("# Managed by ns8-tsa. Do not edit.\n")
+        fp.write('file-signer-passwd: "%s"\n' % password.replace("\\", "\\\\").replace('"', '\\"'))
+finally:
+    os.umask(old_umask)
+os.chmod(tmp, 0o400)
+# rename works even when an old file is still owned by a sub-UID: it only needs
+# write permission on the directory.
+os.replace(tmp, target)

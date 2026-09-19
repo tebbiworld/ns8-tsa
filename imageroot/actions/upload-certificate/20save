@@ -29,6 +29,10 @@ import subprocess
 import urllib.request
 
 import agent
+# The key password lives in state/passwords.env, not in the module environment;
+# openssl reads it from the process environment ("-passout env:...").
+import modsecrets  # noqa: E402
+modsecrets.export_to_environ("TSA_KEY_PASSWORD")
 
 KEEP_FILES = ["tsa-root-key.pem", "tsa-root.pem", "tsa-leaf.pem",
               "tsa-chain.pem", "tsa-leaf-key-enc.pem"]
