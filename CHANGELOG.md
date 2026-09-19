@@ -32,7 +32,7 @@ or, if the update was already tried and failed: the running service is not affec
 
 ### Platform integration
 
-- **Clone and move.** New `clone-module` step (a link to the restore step): a cloned or moved instance gets its route and settings back instead of coming up unconfigured.
+- **Clone and move.** New `clone-module` step (a link to the restore step): a cloned or moved instance gets its route and settings back instead of coming up unconfigured. The settings are read from the source instance, including those a new instance starts with a default for.
 - Release notes are linked from the software centre (`relnotes_url`).
 
 ## 1.0.2 — 2026-09-14
