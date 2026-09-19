@@ -173,6 +173,29 @@ Two helper scripts are provided in [`tests/`](tests/):
 - `negative-eku-test.sh <instance>` – uploads a certificate **without** the
   `timeStamping` EKU and asserts that the module rejects it.
 
+## Updating from 1.0.2 or older
+
+Up to 1.0.2 the certificate files were owned by a container sub-UID, which makes
+`update-module` abort in the core (recursive `chown` over the module directory).
+Run this once before updating, with your instance name:
+
+    runagent -m tsa1 podman unshare chown -R 0:0 state/certs state/cert-archive
+
+If the update was already tried and failed: the running service is not
+affected. Open the TSA settings in cluster-admin and press Save once, the new
+code takes the files back by itself, then update again.
+From 1.1.0 on the files stay owned by the module user and the container maps
+that user to the server UID (`--userns=keep-id:uid=65532,gid=65532`).
+
+## Backup, restore and secrets
+
+The module backup contains the signing key and certificate chain
+(`state/certs`), the archived certificate generations (`state/cert-archive`)
+and `state/passwords.env` with the password of the encrypted key. A restored
+authority signs with the original key. The key password is never stored in the
+module environment (NS8 mirrors that to Redis) and never appears on a command
+line: the server reads it from a private configuration file.
+
 ## Build and publish
 
 The module image is built and pushed to the GitHub container registry:

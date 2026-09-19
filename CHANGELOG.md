@@ -16,7 +16,15 @@ Alignment with the NethServer module conventions (NethServer/agents skills).
 
 ### Fixed
 
-- Certificate permissions are set through the user namespace. Once the files belonged to the server user, a direct `chmod` by the module user failed, which broke `configure-module` after a restore.
+- **update-module works now.** No configured TSA instance could be updated, in any version up to 1.0.2: the certificate files were chown'ed to the sub-UID of the server user, and the core's image extraction ends with a recursive `chown` over the module directory, which fails on files the module user does not own. The same ownership made the second `configure-module` fail (saving the settings twice) and broke `configure-module` after a restore. The container now runs with `--userns=keep-id:uid=65532,gid=65532`: the module user is the server user inside the container, and every file simply stays owned by the module user.
+
+### Updating from 1.0.2 or older
+
+The old version cannot repair itself, the update aborts before any module code runs. Either run this once before updating (replace `tsa1` with your instance):
+
+    runagent -m tsa1 podman unshare chown -R 0:0 state/certs state/cert-archive
+
+or, if the update was already tried and failed: the running service is not affected. Open the TSA settings in cluster-admin and press Save once. The new code takes the files back by itself, and the next update goes through. Key, certificates and the key password do not change.
 
 ### Added
 
