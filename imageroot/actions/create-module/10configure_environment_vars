@@ -25,7 +25,5 @@ agent.set_env("TCP_PORT", tcp_port)
 # Password for the aes-256-cbc encrypted PKCS#8 leaf key. Generated once and
 # kept in the module configuration; it is passed to the timestamp-server via
 # --file-signer-passwd.
-agent.set_env("TSA_KEY_PASSWORD", secrets.token_urlsafe(24))
 
 # Persist the environment for the systemd unit and later actions.
-agent.dump_env()

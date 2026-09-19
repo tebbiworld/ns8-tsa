@@ -40,6 +40,11 @@ import shutil
 import argparse
 import datetime
 import subprocess
+# The key password lives in state/passwords.env, not in the module environment;
+# openssl reads it from the process environment ("-passout env:...").
+import modsecrets  # noqa: E402
+if not os.environ.get("TSA_KEY_PASSWORD"):
+    os.environ["TSA_KEY_PASSWORD"] = modsecrets.get("TSA_KEY_PASSWORD")
 
 ROOT_DAYS = "10950"   # ~30 years
 LEAF_DAYS = "9125"    # ~25 years
