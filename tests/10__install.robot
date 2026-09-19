@@ -22,6 +22,13 @@ Configure the module
 The authority signs a timestamp
     Wait Until Keyword Succeeds    30 times    10 seconds    Timestamp is granted and verified    ${module_id}
 
+Saving the settings a second time works
+    [Documentation]    Regression: once the certificate files belong to the server
+    ...                user, a second configure-module failed on chmod (EPERM).
+    Skip If    '${SCENARIO}' == 'update'    the baseline release still has this bug
+    Run task    module/${module_id}/configure-module    ${CONFIG}    decode_json=${FALSE}
+    Wait Until Keyword Succeeds    30 times    10 seconds    Timestamp is granted and verified    ${module_id}
+
 Remember the signing certificate before the update
     Skip If    '${SCENARIO}' != 'update'    scenario is ${SCENARIO}
     ${fp} =    Run on node    runagent -m ${module_id} bash -c 'sha256sum "$AGENT_STATE_DIR/certs/tsa-chain.pem" | cut -d" " -f1'
@@ -34,6 +41,9 @@ Update to the image under test
     # same key and chain: the migrated password still decrypts the key
     ${fp} =    Run on node    runagent -m ${module_id} bash -c 'sha256sum "$AGENT_STATE_DIR/certs/tsa-chain.pem" | cut -d" " -f1'
     Should Be Equal    ${fp}    ${CHAIN_BEFORE}
+    # and with the fixed release a second save works on the upgraded instance too
+    Run task    module/${module_id}/configure-module    ${CONFIG}    decode_json=${FALSE}
+    Wait Until Keyword Succeeds    30 times    10 seconds    Timestamp is granted and verified    ${module_id}
 
 Configuration reads back
     ${cfg} =    Run task    module/${module_id}/get-configuration    {}
