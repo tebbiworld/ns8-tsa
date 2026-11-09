@@ -42,6 +42,12 @@ ExecStartPre=runagent tsa-gen-cert %S/state/certs --fix-perms
 # not through the environment or the command line.
 ExecStartPre=runagent tsa-write-config
 ExecStartPre=/bin/rm -f %t/tsa.pid %t/tsa.ctr-id
+# Pin the entrypoint to the timestamp-server binary. Upstream ships the image
+# with an empty ENTRYPOINT and CMD=["timestamp-server","serve"] (and has changed
+# this between builds of the same tag), so passing "serve" as the command makes
+# the runtime look for a program called "serve" and the container crash-loops
+# with "executable file 'serve' not found in $PATH". --entrypoint makes the
+# invocation independent of the image's ENTRYPOINT/CMD.
 ExecStart=/usr/bin/podman run \
     --conmon-pidfile %t/tsa.pid \
     --cidfile %t/tsa.ctr-id \
@@ -50,6 +56,7 @@ ExecStart=/usr/bin/podman run \
     --network=host \
     --userns=keep-id:uid=65532,gid=65532 \
     --volume %S/state/certs:/certs:ro,Z \
+    --entrypoint=timestamp-server \
     ${TIMESTAMP_SERVER_IMAGE} \
     serve \
     --host=127.0.0.1 \
