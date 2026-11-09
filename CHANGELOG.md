@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.3 — 2026-11-09
+
+### Fixed
+
+- **The container no longer crash-loops after the v2.2.0 image update.** The upstream `timestamp-server:v2.2.0` image ships with an empty `ENTRYPOINT` and `CMD=["timestamp-server","serve"]`, whereas earlier builds carried `ENTRYPOINT=["timestamp-server"]`. The unit passed `serve` as the command, so with the new image the runtime looked for a program called `serve` and failed with `executable file "serve" not found in $PATH`. The unit now pins `--entrypoint=timestamp-server`, which makes the invocation independent of how the image sets `ENTRYPOINT`/`CMD`.
+
+### Changed
+
+- **Settings page:** a *Copy URL* button next to the timestamp URL, and a note that the root URL `/` returns 404 on purpose while valid requests go to `/api/v1/timestamp` (de/en).
+
 ## 1.1.2 — 2026-11-09
 
 - sigstore timestamp-server v2.1.3 → v2.2.0 (automatic upstream update).

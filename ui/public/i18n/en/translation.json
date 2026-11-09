@@ -38,6 +38,9 @@
         "lets_encrypt_note_desc": "The HTTP-01 challenge requires that ports 80/443 for this FQDN reach this node. If the request arrives via DNAT/forwarding from a gateway, leave Let's Encrypt disabled and run the route with the existing certificate or a wildcard; renewal is handled transparently by the node's Traefik.",
         "tsa_url": "Timestamp URL",
         "tsa_url_desc": "Clients submit RFC 3161 requests to {url}",
+    "tsa_url_root_note": "The root URL / deliberately returns 404 — valid requests go to /api/v1/timestamp.",
+    "tsa_url_copy": "Copy URL",
+    "tsa_url_copied": "URL copied",
         "domain_already_used_in_traefik": "This host name is already used by another instance."
     },
     "certificate": {
