@@ -38,6 +38,9 @@
         "lets_encrypt_note_desc": "Die HTTP-01-Challenge erfordert, dass Port 80/443 für diesen FQDN diesen Node erreicht. Kommt die Anfrage per DNAT/Weiterleitung von einem Gateway, lass Let's Encrypt deaktiviert und betreibe die Route mit dem vorhandenen Zertifikat oder einem Wildcard; das Renewal übernimmt der Traefik des Nodes transparent.",
         "tsa_url": "Zeitstempel-URL",
         "tsa_url_desc": "Clients senden RFC-3161-Anfragen an {url}",
+    "tsa_url_root_note": "Die Wurzel-URL / liefert bewusst 404 – gültige Anfragen gehen an /api/v1/timestamp.",
+    "tsa_url_copy": "URL kopieren",
+    "tsa_url_copied": "URL kopiert",
         "domain_already_used_in_traefik": "Dieser Hostname wird bereits von einer anderen Instanz verwendet."
     },
     "certificate": {

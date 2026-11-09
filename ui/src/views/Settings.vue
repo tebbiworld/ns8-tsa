@@ -70,10 +70,25 @@
               v-if="tsa_url"
               kind="info"
               :title="$t('settings.tsa_url')"
-              :description="$t('settings.tsa_url_desc', { url: tsa_url })"
+              :description="
+                $t('settings.tsa_url_desc', { url: tsa_url }) +
+                '. ' +
+                $t('settings.tsa_url_root_note')
+              "
               :showCloseButton="false"
               class="info-tile"
             />
+            <NsButton
+              v-if="tsa_url"
+              kind="ghost"
+              @click.prevent="copyUrl"
+              class="info-tile"
+              >{{
+                copied
+                  ? $t("settings.tsa_url_copied")
+                  : $t("settings.tsa_url_copy")
+              }}</NsButton
+            >
             <cv-row v-if="error.configureModule">
               <cv-column>
                 <NsInlineNotification
@@ -131,6 +146,7 @@ export default {
       lets_encrypt: false,
       http2https: false,
       tsa_url: "",
+      copied: false,
       loading: {
         getConfiguration: false,
         configureModule: false,
@@ -203,6 +219,22 @@ export default {
       this.http2https = !!config.http2https;
       this.tsa_url = config.tsa_url || "";
       this.focusElement("host");
+    },
+    // Copy the timestamp URL to the clipboard; needs a secure context (the UI is
+    // served over HTTPS). Failures are ignored so the button never throws.
+    async copyUrl() {
+      if (!this.tsa_url || !navigator.clipboard) {
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(this.tsa_url);
+        this.copied = true;
+        setTimeout(() => {
+          this.copied = false;
+        }, 2000);
+      } catch (e) {
+        // Clipboard not available (e.g. insecure context): leave the label as is.
+      }
     },
     validateConfigureModule() {
       this.clearErrors(this);
