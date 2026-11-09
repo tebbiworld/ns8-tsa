@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.2 — 2026-11-09
+
+- sigstore timestamp-server v2.1.3 → v2.2.0 (automatic upstream update).
+
 ## 1.1.0 — 2026-09-19
 
 Alignment with the NethServer module conventions (NethServer/agents skills).
