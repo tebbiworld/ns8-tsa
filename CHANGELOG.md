@@ -13,6 +13,12 @@
 
 - README: a *Terms of use and eIDAS disclaimer* section that the software-centre
   link points at.
+- README: a *Security and compliance* section documenting what the timestamp
+  server does and does not record about issued tokens (it keeps no issuance
+  journal; the token itself carries the serial number, `genTime` and message
+  imprint) and how that fits 21 CFR Part 11 / ALCOA+ (the record is the token,
+  held by the requesting application; the node journal is not an audit trail of
+  issuance).
 
 ## 1.1.3 — 2026-11-09
 

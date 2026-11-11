@@ -183,6 +183,52 @@ If you need qualified or eIDAS-grade timestamps, obtain a commercial
 timestamping certificate from an accredited provider and install it through the
 Certificate page (*Upload certificate*).
 
+## Security and compliance
+
+### What is recorded about issued timestamps
+
+The sigstore timestamp-server is **stateless**: it signs each request and
+returns the token without keeping a copy. It offers no issuance journal and no
+transparency log — the only logging it has is operational HTTP request logging
+(`--log-type dev|prod`) written to the container's standard output, which NS8
+collects in the node journal (and in Loki, if configured). That log records
+*that* a request was served (the time of the HTTP call, the path, the status, a
+request id) but **not** the content of the token: it does not store the token
+serial number, the RFC 3161 `genTime`, or the message imprint (the hash of the
+stamped data).
+
+The authoritative record in RFC 3161 is **the timestamp token itself**. Each
+token carries, cryptographically bound and signed by the authority:
+
+- the **serial number** of the token,
+- the **genTime** — the asserted time, and
+- the **message imprint** — the hash (and hash algorithm) of the data that was
+  stamped.
+
+Verification is cryptographic, against the certificate chain; it does not rely
+on any server-side record.
+
+### Fit for 21 CFR Part 11 / ALCOA+
+
+Treat the module as GAMP infrastructure (a signing service), not as the system
+of record:
+
+- The node journal is **not**, on its own, a sufficient audit trail of issued
+  timestamps. It has no per-token serial/hash/time entry, it is operational and
+  subject to rotation (not tamper-evident), and because RFC 3161 requests are
+  unauthenticated the entries are **not attributable** to an end user.
+- The ALCOA+ record is the token, held and stored by the **requesting**
+  application next to the data it protects. That application — not the TSA —
+  carries the Part 11 obligations (attributability of the requester, retention,
+  audit trail). If you need a central issuance log, build it at that integration
+  layer by storing each returned token with its serial number, message imprint
+  and `genTime`.
+- **Time source.** `genTime` is only as trustworthy as the node clock. The
+  module relies on the node's system time (chrony / systemd-timesyncd) and does
+  not enable the server's optional NTP monitoring. For GMP use, keep the node
+  time synchronised and protected against tampering, and record the time source
+  in your validation.
+
 ## Tests
 
 Two helper scripts are provided in [`tests/`](tests/):
