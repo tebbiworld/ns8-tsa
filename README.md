@@ -224,10 +224,14 @@ of record:
   layer by storing each returned token with its serial number, message imprint
   and `genTime`.
 - **Time source.** `genTime` is only as trustworthy as the node clock. The
-  module relies on the node's system time (chrony / systemd-timesyncd) and does
-  not enable the server's optional NTP monitoring. For GMP use, keep the node
-  time synchronised and protected against tampering, and record the time source
-  in your validation.
+  module relies on the node's system time (chrony / systemd-timesyncd). The
+  server additionally runs its built-in NTP monitoring (the upstream default; it
+  logs `ntp monitoring starting` at boot), which compares the node clock against
+  public NTP servers and warns on drift. The module neither customises nor
+  disables it; the monitoring does not itself set the node time and needs
+  outbound access to those NTP servers to work. For GMP use, keep the node time
+  synchronised and protected against tampering, and record the time source in
+  your validation.
 
 ### Protecting the signing key and backups
 
@@ -237,13 +241,21 @@ of record:
   the node. Anyone who can read the leaf key together with its password can issue
   tokens in your authority's name; anyone who holds the Root CA key can mint new
   leaf certificates.
-- **Keep the Root CA key offline.** The server never uses the Root CA private
-  key — it signs only with the leaf key. The root key is needed solely to issue
-  or rotate a leaf. The recommended posture is therefore an *offline root*: copy
-  `tsa-root-key.pem` to secure offline storage right after the first
-  configuration and treat it as a long-term secret. Leaving it on the node is the
-  module default so that in-place rotation keeps working; if you remove it, keep
-  it somewhere you can restore from before you rotate.
+- **The Root CA key is not needed at runtime.** The server signs only with the
+  leaf key; it never uses the Root CA private key. The module does not reuse the
+  on-node root key to sign a new leaf either — *Rotate* (`regenerate-certificate`)
+  mints a **completely new** root and leaf, after which clients must trust the new
+  Root CA. So `tsa-root-key.pem` is not required to serve timestamps or to rotate
+  within the module, and it can be removed from the node with no effect on the
+  service.
+- **Guard the Root CA key anyway.** Anyone who obtains it can mint, outside the
+  module, new leaf certificates that chain to a Root CA your clients already
+  trust — i.e. forge timestamps that verify. Treat every copy as a long-term
+  secret and restrict access. For a genuine *offline root* (the root key never on
+  an online host), generate the root and leaf offline and install the leaf
+  through *Upload certificate* instead of using in-module generation or rotation;
+  the module's own generation and rotation always write a fresh root key onto the
+  node.
 - **Backups are as sensitive as the keys.** The module backup contains the leaf
   key, the Root CA key, every archived chain and `state/passwords.env` with the
   key password — everything needed to impersonate the authority. Send module
