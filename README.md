@@ -229,6 +229,33 @@ of record:
   time synchronised and protected against tampering, and record the time source
   in your validation.
 
+### Protecting the signing key and backups
+
+- **The signing keys live on the node.** Both the leaf key
+  (`tsa-leaf-key-enc.pem`, the key that actually signs tokens) and the Root CA
+  key (`tsa-root-key.pem`, mode `0400`) are kept in the certificate volume on
+  the node. Anyone who can read the leaf key together with its password can issue
+  tokens in your authority's name; anyone who holds the Root CA key can mint new
+  leaf certificates.
+- **Keep the Root CA key offline.** The server never uses the Root CA private
+  key — it signs only with the leaf key. The root key is needed solely to issue
+  or rotate a leaf. The recommended posture is therefore an *offline root*: copy
+  `tsa-root-key.pem` to secure offline storage right after the first
+  configuration and treat it as a long-term secret. Leaving it on the node is the
+  module default so that in-place rotation keeps working; if you remove it, keep
+  it somewhere you can restore from before you rotate.
+- **Backups are as sensitive as the keys.** The module backup contains the leaf
+  key, the Root CA key, every archived chain and `state/passwords.env` with the
+  key password — everything needed to impersonate the authority. Send module
+  backups only to a **confidential, access-controlled and encrypted**
+  destination, and restrict who may restore them.
+- **Uploaded certificates are validated strictly.** *Upload certificate*
+  installs an externally obtained signer only after verifying that the leaf
+  carries the critical `timeStamping` EKU, that the supplied private key matches
+  the leaf, and that the passphrase decrypts it. If any check fails the upload is
+  rejected and the previous chain is kept untouched; on success the key is
+  re-encrypted with the module's own key password before it is installed.
+
 ## Tests
 
 Two helper scripts are provided in [`tests/`](tests/):

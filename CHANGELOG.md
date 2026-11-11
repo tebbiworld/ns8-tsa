@@ -19,6 +19,11 @@
   imprint) and how that fits 21 CFR Part 11 / ALCOA+ (the record is the token,
   held by the requesting application; the node journal is not an audit trail of
   issuance).
+- README: *Security and compliance* also covers protecting the signing keys —
+  that the server signs only with the leaf key so the Root CA key can be kept
+  offline, that module backups contain the keys and the key password and must go
+  to a confidential destination, and that uploaded certificates are validated
+  strictly before anything is replaced.
 
 ## 1.1.3 — 2026-11-09
 
