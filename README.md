@@ -160,6 +160,29 @@ certificate into the verifying client's trust store, for example:
 - **openssl** – pass the chain via `-CAfile`, as shown above.
 - **OS trust store** – import the Root CA if system-wide trust is required.
 
+## Terms of use and eIDAS disclaimer
+
+This module operates a **self-run** timestamp authority. By installing and using
+it you acknowledge:
+
+- **It is not a qualified trust service.** The authority is **not** a qualified
+  electronic timestamp service under eIDAS (Regulation (EU) No 910/2014) or any
+  comparable scheme, and the module author is not an accredited or supervised
+  trust service provider. The tokens do not carry the legal presumption that a
+  qualified timestamp enjoys.
+- **The trust anchor is a self-signed root.** Tokens are signed under a
+  self-signed Root CA that is generated on this node (see
+  [Certificate architecture](#certificate-architecture)); they are trusted only
+  by parties who have explicitly imported that Root CA. Against third parties who
+  have not, the tokens carry limited evidentiary weight.
+- **Operating it is your responsibility.** Clock accuracy, protection of the
+  signing key, availability and record keeping are the operator's
+  responsibility (see [Security and compliance](#security-and-compliance)).
+
+If you need qualified or eIDAS-grade timestamps, obtain a commercial
+timestamping certificate from an accredited provider and install it through the
+Certificate page (*Upload certificate*).
+
 ## Tests
 
 Two helper scripts are provided in [`tests/`](tests/):

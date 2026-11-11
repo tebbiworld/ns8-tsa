@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.4 — unreleased
+
+### Added
+
+- A **terms-of-use link** in the software centre (`terms_url`): before
+  installing, the operator confirms a short disclaimer that this is a self-run
+  authority, **not** a qualified eIDAS trust service, and that its tokens are
+  signed under a self-signed root (details in the README).
+
+### Documentation
+
+- README: a *Terms of use and eIDAS disclaimer* section that the software-centre
+  link points at.
+
 ## 1.1.3 — 2026-11-09
 
 ### Fixed
