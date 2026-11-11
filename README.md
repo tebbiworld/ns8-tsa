@@ -160,6 +160,114 @@ certificate into the verifying client's trust store, for example:
 - **openssl** – pass the chain via `-CAfile`, as shown above.
 - **OS trust store** – import the Root CA if system-wide trust is required.
 
+## Terms of use and eIDAS disclaimer
+
+This module operates a **self-run** timestamp authority. By installing and using
+it you acknowledge:
+
+- **It is not a qualified trust service.** The authority is **not** a qualified
+  electronic timestamp service under eIDAS (Regulation (EU) No 910/2014) or any
+  comparable scheme, and the module author is not an accredited or supervised
+  trust service provider. The tokens do not carry the legal presumption that a
+  qualified timestamp enjoys.
+- **The trust anchor is a self-signed root.** Tokens are signed under a
+  self-signed Root CA that is generated on this node (see
+  [Certificate architecture](#certificate-architecture)); they are trusted only
+  by parties who have explicitly imported that Root CA. Against third parties who
+  have not, the tokens carry limited evidentiary weight.
+- **Operating it is your responsibility.** Clock accuracy, protection of the
+  signing key, availability and record keeping are the operator's
+  responsibility (see [Security and compliance](#security-and-compliance)).
+
+If you need qualified or eIDAS-grade timestamps, obtain a commercial
+timestamping certificate from an accredited provider and install it through the
+Certificate page (*Upload certificate*).
+
+## Security and compliance
+
+### What is recorded about issued timestamps
+
+The sigstore timestamp-server is **stateless**: it signs each request and
+returns the token without keeping a copy. It offers no issuance journal and no
+transparency log — the only logging it has is operational HTTP request logging
+(`--log-type dev|prod`) written to the container's standard output, which NS8
+collects in the node journal (and in Loki, if configured). That log records
+*that* a request was served (the time of the HTTP call, the path, the status, a
+request id) but **not** the content of the token: it does not store the token
+serial number, the RFC 3161 `genTime`, or the message imprint (the hash of the
+stamped data).
+
+The authoritative record in RFC 3161 is **the timestamp token itself**. Each
+token carries, cryptographically bound and signed by the authority:
+
+- the **serial number** of the token,
+- the **genTime** — the asserted time, and
+- the **message imprint** — the hash (and hash algorithm) of the data that was
+  stamped.
+
+Verification is cryptographic, against the certificate chain; it does not rely
+on any server-side record.
+
+### Fit for 21 CFR Part 11 / ALCOA+
+
+Treat the module as GAMP infrastructure (a signing service), not as the system
+of record:
+
+- The node journal is **not**, on its own, a sufficient audit trail of issued
+  timestamps. It has no per-token serial/hash/time entry, it is operational and
+  subject to rotation (not tamper-evident), and because RFC 3161 requests are
+  unauthenticated the entries are **not attributable** to an end user.
+- The ALCOA+ record is the token, held and stored by the **requesting**
+  application next to the data it protects. That application — not the TSA —
+  carries the Part 11 obligations (attributability of the requester, retention,
+  audit trail). If you need a central issuance log, build it at that integration
+  layer by storing each returned token with its serial number, message imprint
+  and `genTime`.
+- **Time source.** `genTime` is only as trustworthy as the node clock. The
+  module relies on the node's system time (chrony / systemd-timesyncd). The
+  server additionally runs its built-in NTP monitoring (the upstream default; it
+  logs `ntp monitoring starting` at boot), which compares the node clock against
+  public NTP servers and warns on drift. The module neither customises nor
+  disables it; the monitoring does not itself set the node time and needs
+  outbound access to those NTP servers to work. For GMP use, keep the node time
+  synchronised and protected against tampering, and record the time source in
+  your validation.
+
+### Protecting the signing key and backups
+
+- **The signing keys live on the node.** Both the leaf key
+  (`tsa-leaf-key-enc.pem`, the key that actually signs tokens) and the Root CA
+  key (`tsa-root-key.pem`, mode `0400`) are kept in the certificate volume on
+  the node. Anyone who can read the leaf key together with its password can issue
+  tokens in your authority's name; anyone who holds the Root CA key can mint new
+  leaf certificates.
+- **The Root CA key is not needed at runtime.** The server signs only with the
+  leaf key; it never uses the Root CA private key. The module does not reuse the
+  on-node root key to sign a new leaf either — *Rotate* (`regenerate-certificate`)
+  mints a **completely new** root and leaf, after which clients must trust the new
+  Root CA. So `tsa-root-key.pem` is not required to serve timestamps or to rotate
+  within the module, and it can be removed from the node with no effect on the
+  service.
+- **Guard the Root CA key anyway.** Anyone who obtains it can mint, outside the
+  module, new leaf certificates that chain to a Root CA your clients already
+  trust — i.e. forge timestamps that verify. Treat every copy as a long-term
+  secret and restrict access. For a genuine *offline root* (the root key never on
+  an online host), generate the root and leaf offline and install the leaf
+  through *Upload certificate* instead of using in-module generation or rotation;
+  the module's own generation and rotation always write a fresh root key onto the
+  node.
+- **Backups are as sensitive as the keys.** The module backup contains the leaf
+  key, the Root CA key, every archived chain and `state/passwords.env` with the
+  key password — everything needed to impersonate the authority. Send module
+  backups only to a **confidential, access-controlled and encrypted**
+  destination, and restrict who may restore them.
+- **Uploaded certificates are validated strictly.** *Upload certificate*
+  installs an externally obtained signer only after verifying that the leaf
+  carries the critical `timeStamping` EKU, that the supplied private key matches
+  the leaf, and that the passphrase decrypts it. If any check fails the upload is
+  rejected and the previous chain is kept untouched; on success the key is
+  re-encrypted with the module's own key password before it is installed.
+
 ## Tests
 
 Two helper scripts are provided in [`tests/`](tests/):

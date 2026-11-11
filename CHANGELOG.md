@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.1.4 — unreleased
+
+### Added
+
+- A **terms-of-use link** in the software centre (`terms_url`): before
+  installing, the operator confirms a short disclaimer that this is a self-run
+  authority, **not** a qualified eIDAS trust service, and that its tokens are
+  signed under a self-signed root (details in the README).
+
+### Documentation
+
+- README: a *Terms of use and eIDAS disclaimer* section that the software-centre
+  link points at.
+- README: a *Security and compliance* section documenting what the timestamp
+  server does and does not record about issued tokens (it keeps no issuance
+  journal; the token itself carries the serial number, `genTime` and message
+  imprint) and how that fits 21 CFR Part 11 / ALCOA+ (the record is the token,
+  held by the requesting application; the node journal is not an audit trail of
+  issuance).
+- README: *Security and compliance* also covers protecting the signing keys —
+  that the server signs only with the leaf key so the Root CA key is not needed
+  at runtime (and can be kept off the node), that module backups contain the keys
+  and the key password and must go to a confidential destination, and that
+  uploaded certificates are validated strictly before anything is replaced.
+
 ## 1.1.3 — 2026-11-09
 
 ### Fixed
@@ -13,6 +38,20 @@
 ## 1.1.2 — 2026-11-09
 
 - sigstore timestamp-server v2.1.3 → v2.2.0 (automatic upstream update).
+
+## 1.1.1 — 2026-09-23
+
+Continuous-integration changes only; the module image and its behaviour did not
+change.
+
+### Changed
+
+- The QEMU test moved into its own workflow (`test-module-qemu.yml`, chained on
+  the image build through `workflow_run`) so a pull request shows real install
+  and update results, instead of being a job inside the publish workflow.
+- The registry-cleanup workflow now uses the repository's existing
+  `GHCR_TOKEN` secret instead of an `IMAGES_CLEANUP_TOKEN` that was never set,
+  so scheduled cleanup of old image tags runs instead of failing.
 
 ## 1.1.0 — 2026-09-19
 
