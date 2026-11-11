@@ -14,6 +14,20 @@
 
 - sigstore timestamp-server v2.1.3 → v2.2.0 (automatic upstream update).
 
+## 1.1.1 — 2026-09-23
+
+Continuous-integration changes only; the module image and its behaviour did not
+change.
+
+### Changed
+
+- The QEMU test moved into its own workflow (`test-module-qemu.yml`, chained on
+  the image build through `workflow_run`) so a pull request shows real install
+  and update results, instead of being a job inside the publish workflow.
+- The registry-cleanup workflow now uses the repository's existing
+  `GHCR_TOKEN` secret instead of an `IMAGES_CLEANUP_TOKEN` that was never set,
+  so scheduled cleanup of old image tags runs instead of failing.
+
 ## 1.1.0 — 2026-09-19
 
 Alignment with the NethServer module conventions (NethServer/agents skills).
