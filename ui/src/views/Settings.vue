@@ -66,6 +66,23 @@
               :showCloseButton="false"
               class="info-tile"
             />
+            <cv-text-area
+              :label="$t('settings.ip_allowlist')"
+              v-model="ip_allowlist"
+              :placeholder="'192.0.2.0/24\n198.51.100.7'"
+              :helper-text="$t('settings.ip_allowlist_helper')"
+              :disabled="loading.getConfiguration || loading.configureModule"
+              :invalid-message="$t(error.ip_allowlist)"
+              rows="4"
+              class="toggle mono"
+            ></cv-text-area>
+            <NsInlineNotification
+              kind="info"
+              :title="$t('settings.ip_allowlist_note')"
+              :description="$t('settings.ip_allowlist_note_desc')"
+              :showCloseButton="false"
+              class="info-tile"
+            />
             <NsInlineNotification
               v-if="tsa_url"
               kind="info"
@@ -145,6 +162,7 @@ export default {
       host: "",
       lets_encrypt: false,
       http2https: false,
+      ip_allowlist: "",
       tsa_url: "",
       copied: false,
       loading: {
@@ -155,6 +173,7 @@ export default {
         getConfiguration: "",
         configureModule: "",
         host: "",
+        ip_allowlist: "",
       },
     };
   },
@@ -217,6 +236,7 @@ export default {
       this.host = config.host || "";
       this.lets_encrypt = !!config.lets_encrypt;
       this.http2https = !!config.http2https;
+      this.ip_allowlist = (config.ip_allowlist || []).join("\n");
       this.tsa_url = config.tsa_url || "";
       this.focusElement("host");
     },
@@ -235,6 +255,14 @@ export default {
       } catch (e) {
         // Clipboard not available (e.g. insecure context): leave the label as is.
       }
+    },
+    // Split the textarea into a trimmed list of entries, one per line, dropping
+    // blank lines. Syntax (IP/CIDR) is validated by the backend.
+    parseAllowlist(text) {
+      return (text || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
     },
     validateConfigureModule() {
       this.clearErrors(this);
@@ -288,6 +316,7 @@ export default {
             host: this.host,
             lets_encrypt: this.lets_encrypt,
             http2https: this.http2https,
+            ip_allowlist: this.parseAllowlist(this.ip_allowlist),
           },
           extra: {
             title: this.$t("settings.configure_instance", {

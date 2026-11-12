@@ -108,8 +108,8 @@
           <p class="helper">{{ $t("certificate.selftest_desc") }}</p>
           <div v-if="selftest" class="selftest-result">
             <NsInlineNotification
-              :kind="selftestOk ? 'success' : 'warning'"
-              :title="selftestOk ? $t('certificate.selftest_ok') : $t('certificate.selftest_fail')"
+              :kind="selftestKind"
+              :title="selftestTitle"
               :description="selftestSummary"
               :showCloseButton="false"
             />
@@ -349,6 +349,26 @@ export default {
         this.selftest.verify_ok
       );
     },
+    selftestHasWarnings() {
+      return !!(
+        this.selftest &&
+        (this.selftest.cert_warn ||
+          this.selftest.time_warn ||
+          (this.selftest.warnings && this.selftest.warnings.length))
+      );
+    },
+    // success only when the functional test passes AND no standing-health
+    // warning (certificate expiry, clock) was raised.
+    selftestKind() {
+      if (!this.selftestOk) return "warning";
+      return this.selftestHasWarnings ? "warning" : "success";
+    },
+    selftestTitle() {
+      if (!this.selftestOk) return this.$t("certificate.selftest_fail");
+      return this.selftestHasWarnings
+        ? this.$t("certificate.selftest_ok_warnings")
+        : this.$t("certificate.selftest_ok");
+    },
     selftestSummary() {
       if (!this.selftest) return "";
       const s = this.selftest;
@@ -358,7 +378,26 @@ export default {
         `Status: ${s.granted ? "Granted" : "-"}`,
         `verify: ${s.verify_ok ? "OK" : "FAIL"}`,
       ];
-      return parts.join("  •  ") + (s.message ? `  —  ${s.message}` : "");
+      if (s.cert_present && s.cert_leaf_days !== null) {
+        parts.push(
+          this.$t("certificate.selftest_cert_days", { days: s.cert_leaf_days })
+        );
+      }
+      if (s.ntp_synchronized !== null && s.ntp_synchronized !== undefined) {
+        parts.push(
+          `NTP: ${s.ntp_synchronized ? this.$t("certificate.selftest_time_synced") : this.$t("certificate.selftest_time_unsynced")}`
+        );
+      }
+      if (s.time_offset_text) {
+        parts.push(`${this.$t("certificate.selftest_offset")}: ${s.time_offset_text}`);
+      }
+      let summary = parts.join("  •  ");
+      if (s.warnings && s.warnings.length) {
+        summary += "  —  " + s.warnings.join("; ");
+      } else if (s.message) {
+        summary += `  —  ${s.message}`;
+      }
+      return summary;
     },
   },
   beforeRouteEnter(to, from, next) {
