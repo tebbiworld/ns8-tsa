@@ -28,10 +28,10 @@ Issued with the module's default unit (no policy flags overridden):
 
 | Field | Value | Note |
 |---|---|---|
-| Policy OID | `1.3.6.1.4.1.57264.2` | sigstore's built-in default TSA policy OID. The module does not pass `--default-policy-oid`/`--accepted-policy-oids`, so this default applies. |
+| Policy OID | `1.3.6.1.4.1.57264.2` | Observed on timestamp-server v2.2.0 when the policy flags are not overridden; the module passes neither `--default-policy-oid` nor `--accepted-policy-oids` (confirmed in the unit), so the server's default applies. Confirm per the command below. |
 | Hash in `messageImprint` | as requested by the client (e.g. SHA-256) | the TSA echoes the client's digest; it does not re-hash the data. |
 | `genTime` | node system clock, UTC | see §3. |
-| Accuracy | 1 second | reported in the token (`Accuracy: 0x01 seconds`). |
+| Accuracy | 1 second | Observed on v2.2.0 (`Accuracy: 0x01 seconds` in the token). Confirm per the command below. |
 | Serial number | random, per token | |
 | Signing certificate | included in the response (`--include-chain-in-response=true`) | the verifier still needs to trust the Root CA. |
 
@@ -41,14 +41,14 @@ Issued with the module's default unit (no policy flags overridden):
 > the URS; changing it would require overriding the server flags and is out of
 > scope here.
 
-## 3. Time source and accuracy (ALCOA+ "contemporaneous")
+## 3. Time source and accuracy (ALCOA+ "accurate" / "contemporaneous")
 
 - `genTime` is taken from the **node system clock**, disciplined by the node's
   NTP client (chrony on a Rocky node, systemd-timesyncd on Debian). Time
-  accuracy is therefore a direct quality attribute of every token. Time accuracy
-  is a data-integrity expectation (ALCOA+ "contemporaneous"; PIC/S PI 041-1),
-  not a specific Annex 11 clause; protecting the clock from arbitrary change by
-  users is a security control in the sense of Annex 11 §12. On an NS8 node the
+  accuracy is therefore a direct quality attribute of every token. It is a
+  data-integrity expectation (ALCOA+ "accurate" and "contemporaneous"; PIC/S
+  PI 041-1), not a specific Annex 11 clause; protecting the clock from arbitrary
+  change by users is a security control in the sense of Annex 11 §12. On an NS8 node the
   system clock is managed by the platform, not by application users.
 - The server also runs its own NTP monitoring at start-up (it logs
   `ntp monitoring starting`); this is an internal sanity check and is not an
@@ -66,8 +66,9 @@ Issued with the module's default unit (no policy flags overridden):
 - The generated chain is an EC P-384 two-level hierarchy:
   **Root CA ≈ 30 years (10950 days)**, **leaf/signer ≈ 25 years (9125 days)**.
   The leaf carries the critical `timeStamping` extended key usage required by
-  RFC 3161. Confirm the live values on the Certificate page or with
-  `openssl x509 -enddate` on the chain.
+  RFC 3161. `openssl x509 -enddate -noout -in tsa-chain.pem` reads only the
+  **leaf** (first certificate) end date; for the Root CA end date use the
+  Certificate page or extract the last certificate (see §5).
 - Tokens can be issued and verified only while the chain is valid; the self test
   warns 30 days before the leaf or Root CA expires.
 - **Rotation replaces the chain.** The previous chain is archived under the
@@ -90,10 +91,14 @@ Issued with the module's default unit (no policy flags overridden):
 To verify an RFC 3161 token (`response.tsr`) for a data file:
 
 ```bash
-# 1) obtain the TSA signing chain (once): download it from the Certificate page
-#    or from the endpoint, and confirm its Root CA fingerprint out-of-band.
+# 1) obtain the TSA signing chain once and confirm its ROOT CA fingerprint
+#    out-of-band. The chain is leaf-first, so the Root CA is the LAST
+#    certificate (the second of the module's two-certificate chain) --
+#    `openssl x509` alone would read the leaf, so extract the last cert:
 curl -s https://<fqdn>/api/v1/timestamp/certchain -o tsa-chain.pem
-openssl x509 -in tsa-chain.pem -noout -fingerprint -sha256   # compare to the recorded value
+awk 'BEGIN{RS="-----END CERTIFICATE-----\n"} $0 ~ /BEGIN CERTIFICATE/ {last=$0} END{print last "-----END CERTIFICATE-----"}' tsa-chain.pem \
+  | openssl x509 -noout -subject -fingerprint -sha256
+#    -> compare this Root CA SHA-256 fingerprint to the value recorded out-of-band
 
 # 2) verify the token against the data and the chain
 openssl ts -verify -data mydocument.pdf -in response.tsr -CAfile tsa-chain.pem
