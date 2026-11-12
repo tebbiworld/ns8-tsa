@@ -38,6 +38,32 @@ Open the **Settings** page and set:
 On the first save the module generates its self-signed signing chain (see
 [Certificate architecture](#certificate-architecture)) and starts the server.
 
+### Restricting access (optional)
+
+RFC 3161 timestamping is anonymous by design, so the service is **open to
+everyone by default**. If you want to restrict it, fill the **Client IP
+allowlist** on the Settings page with one IP address or CIDR network per line,
+for example:
+
+```
+192.0.2.0/24
+198.51.100.7
+2001:db8:42::/48
+```
+
+- An **empty** list means no restriction (the default). Clearing the list again
+  re-opens the service.
+- When the list is not empty, only the listed client addresses are allowed;
+  every other client receives **HTTP 403**. This is enforced by Traefik's
+  `ipAllowList` middleware in front of the service.
+- The address Traefik compares against is the client IP **as this node sees it**.
+  When requests arrive through a gateway (DNAT) or from another cluster node,
+  that may be the proxy's address rather than the real client's. The node's
+  trusted-proxies setting (`PROXIES_DEPTH`) controls how many forwarding hops
+  Traefik unwinds from `X-Forwarded-For`; allowlist the proxy or configure the
+  trusted proxies accordingly. Verify your rules with a request from an address
+  that should be blocked **and** one that should be allowed.
+
 ## Endpoints
 
 All endpoints live under the configured host name:
@@ -137,8 +163,26 @@ an explicit action.
 - **View** the current signer: subject, valid-until, SHA-256 fingerprint and
   Root CA name.
 - **Download** the certificate chain.
-- **Self test** – issues a real timestamp against the local server and verifies
-  it (`/ping` + `Status: Granted` + `openssl ts -verify` against the chain).
+- **Self test** – a read-only diagnostic (it never changes the certificate or
+  the clock). It:
+  - issues a real timestamp against the local server and verifies it (`/ping` +
+    `Status: Granted` + `openssl ts -verify` against the chain);
+  - checks the **signing-certificate expiry** — both the leaf (signer) and the
+    Root CA — and warns when either is within **30 days** of expiry (or already
+    expired), so you can rotate in time;
+  - checks the **node clock**: whether the OS reports the clock as synchronised
+    to NTP (`timedatectl`), and the offset reported by the local NTP client
+    (`chronyc`), warning when the clock is not synchronised or deviates by more
+    than **1 second**. The RFC 3161 `genTime` is taken from this clock, so a
+    timestamp authority must keep it accurate.
+
+  The self test passes with a warning (rather than a hard failure) when the
+  timestamp itself works but a certificate is near expiry or the clock looks
+  off. The clock offset from `chronyc` is advisory only: if the node runs more
+  than one NTP client, that number can come from another instance, so the OS
+  synchronisation flag is the authoritative signal. Run the self test
+  periodically (e.g. after maintenance, and on a schedule you keep outside the
+  module) to catch an expiring certificate or a drifting clock early.
 - **Rotate** – archives the current chain (with a timestamp in the path) and
   generates a fresh one. Tokens issued **before** a rotation remain verifiable
   only against the archived chain, and clients must trust the new Root CA.

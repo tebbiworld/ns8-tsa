@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.2.0 — unreleased
+
+### Added
+
+- **Optional client IP allowlist** on the Settings page: restrict which client
+  IP addresses or CIDR networks may reach the timestamp authority. The list is
+  empty by default, so the service stays open to everyone (RFC 3161 is anonymous
+  by design); clearing the list again re-opens it. Enforced by Traefik's
+  `ipAllowList` middleware. The allowlist survives backup/restore and clone.
+- **Extended self test**: in addition to issuing and verifying a real timestamp,
+  the self test now checks the **signing-certificate expiry** (leaf and Root CA,
+  warning within 30 days) and the **node clock** (NTP synchronisation via
+  `timedatectl`, plus the offset reported by `chronyc`, warning above a 1-second
+  deviation). It stays a read-only diagnostic and never changes the certificate
+  or the clock. The result is shown with a warning state when the timestamp
+  works but a certificate is near expiry or the clock looks off.
+
+### Documentation
+
+- README: a *Restricting access* section (allowlist, HTTP 403, the
+  trusted-proxies / `PROXIES_DEPTH` caveat for gateway/cross-node setups) and an
+  expanded *Self test* description.
+- `docs/gmp-operation-notes.md`: operator notes for running the TSA in a GMP /
+  21 CFR Part 11 context (time accuracy, certificate lifecycle, access
+  restriction), consistent with the existing eIDAS / Part 11 disclaimers and
+  making no conformity claim.
+
 ## 1.1.4 — 2026-11-11
 
 ### Added
