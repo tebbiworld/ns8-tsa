@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.0 — unreleased
+
+### Added
+
+- **Extended self test**: in addition to issuing and verifying a real timestamp,
+  the self test now checks the **signing-certificate expiry** (leaf and Root CA,
+  warning within 30 days) and the **node clock** (NTP synchronisation via
+  `timedatectl`, plus the offset reported by `chronyc`, warning above a 1-second
+  deviation). It stays a read-only diagnostic and never changes the certificate
+  or the clock. The result is shown with a warning state when the timestamp
+  works but a certificate is near expiry or the clock looks off.
+
+### Documentation
+
+- README: an expanded *Self test* description (certificate-expiry and clock
+  checks).
+- `docs/gmp-operation-notes.md`: operator notes for running the TSA in a GMP /
+  21 CFR Part 11 context — time source (chrony/NTP) and accuracy, the token
+  policy OID, certificate lifetimes, archiving of superseded chains, and a token
+  verification procedure — consistent with the existing eIDAS / Part 11
+  disclaimers and making no conformity claim.
+
 ## 1.1.4 — 2026-11-11
 
 ### Added
