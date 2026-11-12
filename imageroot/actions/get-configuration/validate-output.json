@@ -14,6 +14,10 @@
         "cert_subject": { "type": "string" },
         "cert_not_after": { "type": "string" },
         "cert_fingerprint": { "type": "string" },
-        "root_ca_cn": { "type": "string" }
+        "root_ca_cn": { "type": "string" },
+        "ip_allowlist": {
+            "type": "array",
+            "items": { "type": "string" }
+        }
     }
 }

@@ -18,6 +18,7 @@ import sys
 import json
 
 import agent
+import tsanet
 
 data = json.load(sys.stdin)
 
@@ -33,6 +34,12 @@ route = {
     "http2https": h2hs,
     "lets_encrypt_check": True,
     "lets_encrypt_cleanup": True,
+    # Always send the allowlist (possibly empty) so that removing every entry
+    # drops the ipAllowList middleware and re-opens the service. set-route only
+    # clears the restriction when it receives an empty list. The value comes
+    # from the request (like host/http2https), not the environment: a set_env
+    # from an earlier step of this same run is not yet in os.environ here.
+    "ip_allowlist": tsanet.normalize_allowlist(data.get("ip_allowlist", [])),
 }
 if "lets_encrypt" in data:
     route["lets_encrypt"] = data["lets_encrypt"]

@@ -14,6 +14,7 @@ import sys
 import json
 
 import agent
+import tsanet
 
 data = json.load(sys.stdin)
 
@@ -25,6 +26,11 @@ agent.set_env("TRAEFIK_HTTP2HTTPS", h2hs)
 if "lets_encrypt" in data:
     # kept so restore-module can re-create the route with the same setting
     agent.set_env("TRAEFIK_LETS_ENCRYPT", data["lets_encrypt"])
+
+# Optional client IP/network allowlist, stored as a JSON array (non-secret). An
+# empty list is stored explicitly so configure-module always hands set-route an
+# ip_allowlist and thereby clears a restriction that was set before.
+agent.set_env(tsanet.ENV_KEY, tsanet.format_allowlist(data.get("ip_allowlist", [])))
 
 # Default common names for the self-signed signing chain, derived from the host
 # name. Only seeded once so they stay stable across reconfigurations and match

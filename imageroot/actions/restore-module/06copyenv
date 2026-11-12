@@ -26,7 +26,7 @@ else:
     # environment in state/environment.clone-module until its last step.
     env = agent.read_envfile("environment.clone-module")
 
-KEEP = ["TRAEFIK_HOST", "TRAEFIK_HTTP2HTTPS", "TRAEFIK_LETS_ENCRYPT", "TSA_ROOT_CA_CN", "TSA_LEAF_CN"]
+KEEP = ["TRAEFIK_HOST", "TRAEFIK_HTTP2HTTPS", "TRAEFIK_LETS_ENCRYPT", "TSA_ROOT_CA_CN", "TSA_LEAF_CN", "TRAEFIK_IP_ALLOWLIST"]
 
 agent.mset_env({k: env[k] for k in KEEP if k in env})
 
