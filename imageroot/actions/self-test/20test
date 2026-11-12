@@ -71,22 +71,47 @@ result = {
 }
 
 
+_MONTHS = {
+    name: number
+    for number, name in enumerate(
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+        start=1,
+    )
+}
+
+
 def _parse_openssl_time(value):
-    """Parse an OpenSSL notAfter string (e.g. 'Nov 12 06:00:00 2051 GMT')."""
+    """Parse an OpenSSL notAfter string (e.g. 'Nov 12 06:00:00 2051 GMT').
+
+    Parsed without strptime's %b so it does not depend on the process locale:
+    OpenSSL always emits English month abbreviations. Raises ValueError on any
+    unexpected shape.
+    """
     value = value.strip()
     if value.lower().endswith(" gmt"):
         value = value[:-4].strip()
-    return datetime.datetime.strptime(value, "%b %d %H:%M:%S %Y").replace(
-        tzinfo=datetime.timezone.utc
+    parts = value.split()  # ['Nov', '12', '06:00:00', '2051']
+    if len(parts) != 4 or parts[0] not in _MONTHS:
+        raise ValueError(f"unexpected OpenSSL date: {value!r}")
+    month = _MONTHS[parts[0]]
+    day = int(parts[1])
+    hour, minute, second = (int(x) for x in parts[2].split(":"))
+    year = int(parts[3])
+    return datetime.datetime(
+        year, month, day, hour, minute, second, tzinfo=datetime.timezone.utc
     )
 
 
 def _enddate_of(pem_text):
     """Return (notAfter string, days remaining) for the first cert in pem_text."""
-    proc = subprocess.run(
-        ["openssl", "x509", "-noout", "-enddate"],
-        input=pem_text, capture_output=True, text=True,
-    )
+    try:
+        proc = subprocess.run(
+            ["openssl", "x509", "-noout", "-enddate"],
+            input=pem_text, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "", None
     if proc.returncode != 0:
         return "", None
     line = proc.stdout.strip()
@@ -174,7 +199,10 @@ def _chrony_offset():
     )
     if not match:
         return None, ""
-    magnitude = float(match.group(1))
+    try:
+        magnitude = float(match.group(1))
+    except ValueError:
+        return None, ""
     direction = match.group(2)
     # 'slow of NTP time' = the system clock is behind -> negative offset.
     seconds = -magnitude if direction == "slow" else magnitude
@@ -195,7 +223,10 @@ def _check_time():
     if synchronized is False:
         result["time_warn"] = True
         result["warnings"].append("the node clock is not synchronised to an NTP source")
-    elif synchronized is None and offset is None:
+    elif synchronized is None:
+        # The authoritative sync flag is unknown; the chronyc offset is only
+        # advisory (it may come from another NTP client), so never show an
+        # all-clear here.
         result["time_warn"] = True
         result["warnings"].append("the node clock synchronisation state could not be determined")
 
@@ -214,9 +245,19 @@ def _finish():
 
 
 # 5) + 6) standing-health checks first, so they are reported even if the
-# service itself is down.
-_check_certificate()
-_check_time()
+# service itself is down. They must never crash the diagnostic: on any
+# unexpected error record a warning and carry on, so the action still exits 0
+# with valid JSON.
+try:
+    _check_certificate()
+except Exception as exc:  # noqa: BLE001 - diagnostic must not abort
+    result["cert_warn"] = True
+    result["warnings"].append(f"certificate check failed: {exc}")
+try:
+    _check_time()
+except Exception as exc:  # noqa: BLE001 - diagnostic must not abort
+    result["time_warn"] = True
+    result["warnings"].append(f"time check failed: {exc}")
 
 # 1) /ping
 try:
