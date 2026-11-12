@@ -31,14 +31,16 @@ authoritative description of what the timestamp server does and does not record.
 These three controls support, but do not by themselves establish, data
 integrity for the timestamps a GMP application relies on.
 
-### 2.1 Time accuracy (ALCOA+ "contemporaneous"; Annex 11 §12, data-integrity)
+### 2.1 Time accuracy (ALCOA+ "contemporaneous")
 
 - The `genTime` in every token is taken from the **node system clock**. Its
-  accuracy is therefore a direct quality attribute of every timestamp.
-- The node clock must be disciplined by NTP (chrony/systemd-timesyncd) and, per
-  the data-integrity expectation, protected from arbitrary change by users.
-  On an NS8 node the system clock is managed by the platform, not by application
-  users.
+  accuracy is therefore a direct quality attribute of every timestamp. Time
+  accuracy is a data-integrity expectation (ALCOA+ "contemporaneous"; PIC/S
+  PI 041-1), not a specific Annex 11 clause.
+- The node clock must be disciplined by NTP (chrony/systemd-timesyncd) and
+  protected from arbitrary change by users — the latter a security control in
+  the sense of Annex 11 §12. On an NS8 node the system clock is managed by the
+  platform, not by application users.
 - The **Self test** (Certificate page) now reports whether the OS considers the
   clock synchronised and the offset reported by the local NTP client, and warns
   above a 1-second deviation. Record the self-test result as evidence of clock
