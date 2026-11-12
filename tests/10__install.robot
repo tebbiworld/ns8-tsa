@@ -56,6 +56,13 @@ Configuration reads back
     ${cfg} =    Run task    module/${module_id}/get-configuration    {}
     Should Be Equal    ${cfg['host']}    tsa.ci.test
 
+Self test reports certificate and clock health
+    [Documentation]    The self test additionally reports signing certificate
+    ...                expiry and node clock synchronisation.
+    ${res} =    Run task    module/${module_id}/self-test    {}
+    Should Be True    ${res['cert_present']}    ${res}
+    Should Be True    ${res['cert_leaf_days']} > 0    ${res}
+
 The key password is not on the command line
     ${out} =    Run on node    ps -eo args | grep -c '[f]ile-signer-passwd' || true
     Should Be Equal As Integers    ${out.strip()}    0

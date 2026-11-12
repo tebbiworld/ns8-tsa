@@ -137,8 +137,26 @@ an explicit action.
 - **View** the current signer: subject, valid-until, SHA-256 fingerprint and
   Root CA name.
 - **Download** the certificate chain.
-- **Self test** – issues a real timestamp against the local server and verifies
-  it (`/ping` + `Status: Granted` + `openssl ts -verify` against the chain).
+- **Self test** – a read-only diagnostic (it never changes the certificate or
+  the clock). It:
+  - issues a real timestamp against the local server and verifies it (`/ping` +
+    `Status: Granted` + `openssl ts -verify` against the chain);
+  - checks the **signing-certificate expiry** — both the leaf (signer) and the
+    Root CA — and warns when either is within **30 days** of expiry (or already
+    expired), so you can rotate in time;
+  - checks the **node clock**: whether the OS reports the clock as synchronised
+    to NTP (`timedatectl`), and the offset reported by the local NTP client
+    (`chronyc`), warning when the clock is not synchronised or deviates by more
+    than **1 second**. The RFC 3161 `genTime` is taken from this clock, so a
+    timestamp authority must keep it accurate.
+
+  The self test passes with a warning (rather than a hard failure) when the
+  timestamp itself works but a certificate is near expiry or the clock looks
+  off. The clock offset from `chronyc` is advisory only: if the node runs more
+  than one NTP client, that number can come from another instance, so the OS
+  synchronisation flag is the authoritative signal. Run the self test
+  periodically (e.g. after maintenance, and on a schedule you keep outside the
+  module) to catch an expiring certificate or a drifting clock early.
 - **Rotate** – archives the current chain (with a timestamp in the path) and
   generates a fresh one. Tokens issued **before** a rotation remain verifiable
   only against the archived chain, and clients must trust the new Root CA.

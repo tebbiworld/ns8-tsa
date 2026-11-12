@@ -5,20 +5,36 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-# End-to-end self test of the timestamp authority, executed on the node:
+# End-to-end self test of the timestamp authority, executed on the node. It is a
+# read-only diagnostic: it never changes the certificate or the clock, and it
+# always succeeds (exit 0) — any problem is reported in the structured output.
+#
+# Live service checks:
 #   1. GET /ping                              -> service is up
 #   2. openssl ts -query | POST timestamp     -> HTTP 200
 #   3. openssl ts -reply  ... Status: Granted -> a token was issued
 #   4. openssl ts -verify ... against chain   -> the token verifies
 #
-# Returns a structured result for the UI.
+# Standing-health checks (run even when the service is down, because they do not
+# depend on it):
+#   5. signing certificate expiry (leaf = signer, and Root CA)
+#   6. node time synchronisation / deviation (the RFC 3161 genTime is the node
+#      clock), warning at a threshold.
 
 import os
+import re
 import sys
 import json
 import tempfile
+import datetime
 import subprocess
 import urllib.request
+
+# Warn thresholds. The certificate one gives the operator time to rotate before
+# tokens can no longer be issued/verified; the time one reflects that a timestamp
+# authority must keep an accurate clock.
+CERT_EXPIRY_WARN_DAYS = 30
+TIME_OFFSET_WARN_SECONDS = 1.0
 
 # Consume stdin to follow the action protocol (no input expected).
 try:
@@ -31,12 +47,217 @@ certdir = os.path.expanduser("~/.config/state/certs")
 chain_path = os.path.join(certdir, "tsa-chain.pem")
 
 result = {
+    # live service checks
     "ping_ok": False,
     "http_status": 0,
     "granted": False,
     "verify_ok": False,
+    # certificate expiry
+    "cert_present": False,
+    "cert_leaf_not_after": "",
+    "cert_leaf_days": None,
+    "cert_root_not_after": "",
+    "cert_root_days": None,
+    "cert_warn": False,
+    # node time
+    "ntp_synchronized": None,
+    "time_offset_seconds": None,
+    "time_offset_text": "",
+    "time_source": "unknown",
+    "time_warn": False,
+    # human-readable warnings collected from the standing-health checks
+    "warnings": [],
     "message": "",
 }
+
+
+_MONTHS = {
+    name: number
+    for number, name in enumerate(
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+        start=1,
+    )
+}
+
+
+def _parse_openssl_time(value):
+    """Parse an OpenSSL notAfter string (e.g. 'Nov 12 06:00:00 2051 GMT').
+
+    Parsed without strptime's %b so it does not depend on the process locale:
+    OpenSSL always emits English month abbreviations. Raises ValueError on any
+    unexpected shape.
+    """
+    value = value.strip()
+    if value.lower().endswith(" gmt"):
+        value = value[:-4].strip()
+    parts = value.split()  # ['Nov', '12', '06:00:00', '2051']
+    if len(parts) != 4 or parts[0] not in _MONTHS:
+        raise ValueError(f"unexpected OpenSSL date: {value!r}")
+    month = _MONTHS[parts[0]]
+    day = int(parts[1])
+    hour, minute, second = (int(x) for x in parts[2].split(":"))
+    year = int(parts[3])
+    return datetime.datetime(
+        year, month, day, hour, minute, second, tzinfo=datetime.timezone.utc
+    )
+
+
+def _enddate_of(pem_text):
+    """Return (notAfter string, days remaining) for the first cert in pem_text."""
+    try:
+        proc = subprocess.run(
+            ["openssl", "x509", "-noout", "-enddate"],
+            input=pem_text, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "", None
+    if proc.returncode != 0:
+        return "", None
+    line = proc.stdout.strip()
+    not_after = line[len("notAfter="):].strip() if line.startswith("notAfter=") else line
+    try:
+        expires = _parse_openssl_time(not_after)
+    except ValueError:
+        return not_after, None
+    now = datetime.datetime.now(datetime.timezone.utc)
+    days = (expires - now).days
+    return not_after, days
+
+
+def _check_certificate():
+    """Fill the certificate-expiry fields from the local signing chain."""
+    if not os.path.exists(chain_path):
+        return
+    try:
+        with open(chain_path) as fp:
+            chain = fp.read()
+    except OSError:
+        return
+    blocks = [b for b in chain.split("-----END CERTIFICATE-----") if "BEGIN CERTIFICATE" in b]
+    if not blocks:
+        return
+    result["cert_present"] = True
+    end = "-----END CERTIFICATE-----\n"
+    # First certificate is the leaf/signer; the last is the Root CA.
+    result["cert_leaf_not_after"], result["cert_leaf_days"] = _enddate_of(blocks[0] + end)
+    result["cert_root_not_after"], result["cert_root_days"] = _enddate_of(blocks[-1] + end)
+
+    for label, days in (("signing (leaf)", result["cert_leaf_days"]),
+                        ("Root CA", result["cert_root_days"])):
+        if days is None:
+            continue
+        if days < 0:
+            result["cert_warn"] = True
+            result["warnings"].append(f"the {label} certificate expired {-days} day(s) ago")
+        elif days < CERT_EXPIRY_WARN_DAYS:
+            result["cert_warn"] = True
+            result["warnings"].append(f"the {label} certificate expires in {days} day(s)")
+
+
+def _ntp_synchronized():
+    """OS view of clock synchronisation (authoritative, per-host, user-readable).
+
+    Returns True/False, or None when it cannot be determined.
+    """
+    try:
+        proc = subprocess.run(
+            ["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    answer = proc.stdout.strip().lower()
+    if answer in ("yes", "true", "1"):
+        return True
+    if answer in ("no", "false", "0"):
+        return False
+    return None
+
+
+def _chrony_offset():
+    """Best-effort clock offset in seconds from the local NTP client.
+
+    Only advisory: on a node that runs more than one chronyd (e.g. an AD domain
+    controller next to the host daemon), a non-root 'chronyc' may reach either
+    over 127.0.0.1:323. The value is therefore used only to RAISE a warning,
+    never to clear one. Returns (seconds, text) or (None, "").
+    """
+    try:
+        proc = subprocess.run(
+            ["chronyc", "-n", "tracking"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None, ""
+    if proc.returncode != 0:
+        return None, ""
+    match = re.search(
+        r"System time\s*:\s*([0-9.]+)\s+seconds\s+(slow|fast)", proc.stdout
+    )
+    if not match:
+        return None, ""
+    try:
+        magnitude = float(match.group(1))
+    except ValueError:
+        return None, ""
+    direction = match.group(2)
+    # 'slow of NTP time' = the system clock is behind -> negative offset.
+    seconds = -magnitude if direction == "slow" else magnitude
+    return seconds, f"{magnitude:.6f} s {direction} of NTP time"
+
+
+def _check_time():
+    """Fill the time-synchronisation fields."""
+    synchronized = _ntp_synchronized()
+    result["ntp_synchronized"] = synchronized
+
+    offset, text = _chrony_offset()
+    if offset is not None:
+        result["time_offset_seconds"] = offset
+        result["time_offset_text"] = text
+        result["time_source"] = "chrony"
+
+    if synchronized is False:
+        result["time_warn"] = True
+        result["warnings"].append("the node clock is not synchronised to an NTP source")
+    elif synchronized is None:
+        # The authoritative sync flag is unknown; the chronyc offset is only
+        # advisory (it may come from another NTP client), so never show an
+        # all-clear here.
+        result["time_warn"] = True
+        result["warnings"].append("the node clock synchronisation state could not be determined")
+
+    if offset is not None and abs(offset) > TIME_OFFSET_WARN_SECONDS:
+        result["time_warn"] = True
+        result["warnings"].append(
+            f"the node clock deviates from NTP time by {text} "
+            f"(threshold {TIME_OFFSET_WARN_SECONDS:g} s)"
+        )
+
+
+def _finish():
+    """Write the result and exit; always exit 0 (this is a diagnostic)."""
+    json.dump(result, fp=sys.stdout)
+    sys.exit(0)
+
+
+# 5) + 6) standing-health checks first, so they are reported even if the
+# service itself is down. They must never crash the diagnostic: on any
+# unexpected error record a warning and carry on, so the action still exits 0
+# with valid JSON.
+try:
+    _check_certificate()
+except Exception as exc:  # noqa: BLE001 - diagnostic must not abort
+    result["cert_warn"] = True
+    result["warnings"].append(f"certificate check failed: {exc}")
+try:
+    _check_time()
+except Exception as exc:  # noqa: BLE001 - diagnostic must not abort
+    result["time_warn"] = True
+    result["warnings"].append(f"time check failed: {exc}")
 
 # 1) /ping
 try:
@@ -44,8 +265,7 @@ try:
         result["ping_ok"] = r.status == 200
 except Exception as exc:
     result["message"] = f"ping failed: {exc}"
-    json.dump(result, fp=sys.stdout)
-    sys.exit(0)
+    _finish()
 
 with tempfile.TemporaryDirectory() as tmp:
     data_file = os.path.join(tmp, "data.bin")
@@ -61,8 +281,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     if q.returncode != 0:
         result["message"] = "openssl ts -query failed: " + (q.stderr or "").strip()
-        json.dump(result, fp=sys.stdout)
-        sys.exit(0)
+        _finish()
 
     with open(tsq, "rb") as fp:
         query_bytes = fp.read()
@@ -81,12 +300,10 @@ with tempfile.TemporaryDirectory() as tmp:
     except urllib.error.HTTPError as exc:
         result["http_status"] = exc.code
         result["message"] = f"timestamp request returned HTTP {exc.code}"
-        json.dump(result, fp=sys.stdout)
-        sys.exit(0)
+        _finish()
     except Exception as exc:
         result["message"] = f"timestamp request failed: {exc}"
-        json.dump(result, fp=sys.stdout)
-        sys.exit(0)
+        _finish()
 
     with open(tsr, "wb") as fp:
         fp.write(reply_bytes)
@@ -109,4 +326,4 @@ with tempfile.TemporaryDirectory() as tmp:
     elif result["granted"]:
         result["message"] = "Timestamp granted and verified against the local chain."
 
-json.dump(result, fp=sys.stdout)
+_finish()
