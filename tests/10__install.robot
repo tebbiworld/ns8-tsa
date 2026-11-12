@@ -56,6 +56,25 @@ Configuration reads back
     ${cfg} =    Run task    module/${module_id}/get-configuration    {}
     Should Be Equal    ${cfg['host']}    tsa.ci.test
 
+An IP allowlist round-trips and can be cleared
+    [Documentation]    URS-1: the optional client allowlist is stored, read back
+    ...                and, when emptied, removed so the service re-opens.
+    Run task    module/${module_id}/configure-module    {"host":"tsa.ci.test","lets_encrypt":false,"http2https":true,"ip_allowlist":["192.0.2.0/24","198.51.100.7"]}    decode_json=${FALSE}
+    ${cfg} =    Run task    module/${module_id}/get-configuration    {}
+    Length Should Be    ${cfg['ip_allowlist']}    2
+    Should Contain    ${cfg['ip_allowlist']}    192.0.2.0/24
+    Run task    module/${module_id}/configure-module    ${CONFIG}    decode_json=${FALSE}
+    ${cfg} =    Run task    module/${module_id}/get-configuration    {}
+    Should Be Empty    ${cfg['ip_allowlist']}
+    Wait Until Keyword Succeeds    30 times    10 seconds    Timestamp is granted and verified    ${module_id}
+
+Self test reports certificate and clock health
+    [Documentation]    URS-2: the self test additionally reports signing
+    ...                certificate expiry and node clock synchronisation.
+    ${res} =    Run task    module/${module_id}/self-test    {}
+    Should Be True    ${res['cert_present']}    ${res}
+    Should Be True    ${res['cert_leaf_days']} > 0    ${res}
+
 The key password is not on the command line
     ${out} =    Run on node    ps -eo args | grep -c '[f]ile-signer-passwd' || true
     Should Be Equal As Integers    ${out.strip()}    0
